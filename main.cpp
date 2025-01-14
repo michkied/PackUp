@@ -5,9 +5,6 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
-#include <cstddef>
-
-#define __cpp_lib_byte
 
 //#define PRINT_USAGE std::cout << "Usage: " << argv[0] << " <c/d> <fl/rl> <input file> <output file>" << std::endl; return 1
 
