@@ -17,17 +17,18 @@ int main(int argc, char* argv[])
        //if (argv[1][0] != 'c' && argv[1][0] != 'd') PRINT_USAGE;
        //if (argv[2][0] != 'f' && argv[2][0] != 'r') PRINT_USAGE;
 
-    std::ifstream input("input.txt", std::ios::in | std::ios::binary);
-    std::ofstream output("output.txt", std::ios::out | std::ios::binary);
-    if (!input || !output) {
+    std::ifstream input_file("input.txt", std::ios::in | std::ios::binary);
+    std::ofstream output_file("output.txt", std::ios::out | std::ios::binary);
+    if (!input_file || !output_file) {
         return 1;
     }
-    std::vector<unsigned char> bytes(std::istreambuf_iterator<char>{input}, {});
+    std::vector<unsigned char> input(std::istreambuf_iterator<char>{input_file}, {});
+    std::vector<unsigned char> output;
 
-    input.close();
+    input_file.close();
 
-	auto compressed = run_length_compress(bytes);
-	output.write(reinterpret_cast<const char*>(compressed.data()), compressed.size());
+	auto compressed = run_length_compress(input, output);
+    output_file.write(reinterpret_cast<const char*>(output.data()), output.size());
 
     //const int arraySize = 5;
     //const int a[arraySize] = { 1, 2, 3, 4, 5 };
@@ -44,13 +45,13 @@ int main(int argc, char* argv[])
     //printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
     //    c[0], c[1], c[2], c[3], c[4]);
 
-    //// cudaDeviceReset must be called before exiting in order for profiling and
-    //// tracing tools such as Nsight and Visual Profiler to show complete traces.
-    //cudaStatus = cudaDeviceReset();
-    //if (cudaStatus != cudaSuccess) {
-    //    fprintf(stderr, "cudaDeviceReset failed!");
-    //    return 1;
-    //}
+    // cudaDeviceReset must be called before exiting in order for profiling and
+    // tracing tools such as Nsight and Visual Profiler to show complete traces.
+    cudaError_t cudaStatus = cudaDeviceReset();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceReset failed!");
+        return 1;
+    }
 
     return 0;
 }

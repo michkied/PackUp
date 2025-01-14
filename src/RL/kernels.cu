@@ -4,8 +4,8 @@
 
 #include "RL/kernels.h"
 
-__global__ void addKernel(int *c, const int *a, const int *b)
+__global__ void rlCompressKernel(unsigned char* input, unsigned char* output)
 {
     int i = threadIdx.x;
-    c[i] = a[i] + b[i];
+	output[i] = input[i] + 1;
 }
