@@ -16,9 +16,10 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
 	unsigned char host_data[100];
     unsigned char bound;
 
+    unsigned int symbol_size = 3;
+
     cudaError_t cudaStatus;
 
-    // Choose which GPU to run on, change this on a multi-GPU system.
     cudaStatus = cudaSetDevice(0);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
@@ -62,7 +63,7 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
 		return cudaStatus;
 	}
 
-	rlCompressKernel << <1, input.size()>> > (dev_input, input.size(), dev_A, dev_B);
+	rlCompressKernel << <1, input.size() / symbol_size >> > (dev_input, input.size(), symbol_size, dev_A, dev_B);
 
     // Check for any errors launching the kernel
     cudaStatus = cudaGetLastError();
@@ -87,10 +88,12 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
         return cudaStatus;
     }
 
+    cudaStatus = cudaMemcpy(host_data, dev_B, input.size(), cudaMemcpyDeviceToHost);
+
 	thrust::inclusive_scan(thrust::device, dev_B, dev_B + input.size(), dev_B);
     thrust::inclusive_scan_by_key(thrust::device, dev_B, dev_B + input.size(), dev_A, dev_A, thrust::equal_to<unsigned char>{}, thrust::plus<unsigned char>{});
 
-	rlCollectResults << <1, input.size() >> > (dev_input, input.size(), dev_A, dev_B, dev_output);
+	rlCollectResults << <1, input.size() / symbol_size >> > (dev_input, input.size(), symbol_size, dev_A, dev_B, dev_output);
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
@@ -111,8 +114,8 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
     }
 
     // Copy output vector from GPU buffer to host memory.
-    cudaStatus = cudaMemcpy(host_data, dev_output, input.size() * 2, cudaMemcpyDeviceToHost);
-    cudaStatus = cudaMemcpy(&bound, dev_B+input.size()-1, 1, cudaMemcpyDeviceToHost);
+    cudaStatus = cudaMemcpy(&bound, dev_B + input.size() - 1, 1, cudaMemcpyDeviceToHost);
+    cudaStatus = cudaMemcpy(host_data, dev_output, bound + bound * symbol_size, cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy failed!");
         cudaFree(dev_input);
@@ -127,7 +130,7 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
     cudaFree(dev_A);
     cudaFree(dev_B);
 
-	for (int i = 0; i < bound * 2; i++) {
+	for (int i = 0; i < bound + bound * symbol_size; i++) {
 		output.push_back(host_data[i]);
 	}
 
