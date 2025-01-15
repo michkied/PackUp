@@ -4,7 +4,7 @@
 
 #include "RL/kernels.h"
 
-__global__ void rlCompressKernel(unsigned char* input, long int input_size, unsigned char* A, unsigned char* B)
+__global__ void rlCompressKernel(unsigned char* input, long unsigned int input_size, unsigned char* A, unsigned char* B)
 {
     int i = threadIdx.x;
 	if (i >= input_size) return;
@@ -20,7 +20,7 @@ __global__ void rlCompressKernel(unsigned char* input, long int input_size, unsi
 	A[i] = 1;
 }
 
-__global__ void rlCollectResults(unsigned char* input, long int input_size, unsigned char* A, unsigned char* B, unsigned char* output)
+__global__ void rlCollectResults(unsigned char* input, long unsigned int input_size, unsigned char* A, unsigned char* B, unsigned char* output)
 {
 	int i = threadIdx.x;
 	if (i == input_size - 1 || B[i] != B[i + 1]) {
