@@ -17,12 +17,12 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
     unsigned int bound;
 
     unsigned int symbol_size = 1;
-	unsigned int threads_per_block = 256;
+	unsigned int threads_per_block = 4;
 	unsigned int symbol_count = input_size / symbol_size;
 
-    unsigned int array_size = 1;
+    unsigned int array_size = 0;
     while (array_size < symbol_count)
-        array_size *= 2;
+        array_size += threads_per_block * 2;
 
     cudaError_t cudaStatus;
 
@@ -115,7 +115,22 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
 	//thrust::inclusive_scan(thrust::device, dev_B, dev_B + symbol_count, dev_B);
 	/*rlPrescan << < symbol_count / threads_per_block + 1, threads_per_block, symbol_count * sizeof(int) >> > (dev_B, dev_B_scan, symbol_count);*/
 
-    rlPrescan << < 1, array_size / 2, array_size * sizeof(int) >> > (dev_B, dev_B, array_size);
+    //for (int i = 0; i < symbol_count; i += threads_per_block * 2)
+    //{
+    //    rlScan << < 1, threads_per_block, threads_per_block * 2 * sizeof(int) >> > (dev_B + i, threads_per_block * 2);
+    //    cudaStatus = cudaGetLastError();
+    //    if (cudaStatus != cudaSuccess) {
+    //        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+    //        cudaFree(dev_input);
+    //        cudaFree(dev_output_counts);
+    //        cudaFree(dev_output_symbols);
+    //        cudaFree(dev_A);
+    //        cudaFree(dev_B);
+    //        return cudaStatus;
+    //    }
+    //}
+
+    rlScan << < array_size / 2 / threads_per_block, threads_per_block, threads_per_block * 2 * sizeof(int) >> > (dev_B, threads_per_block * 2);
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
@@ -126,6 +141,7 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
         cudaFree(dev_B);
         return cudaStatus;
     }
+
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
@@ -137,7 +153,8 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
         return cudaStatus;
     }
     fprintf(stderr, "   Done\n");
-	cudaStatus = cudaMemcpy(debug, dev_B, symbol_count * sizeof(int), cudaMemcpyDeviceToHost);
+    unsigned int debug2[100];
+	cudaStatus = cudaMemcpy(debug2, dev_B, symbol_count * sizeof(int), cudaMemcpyDeviceToHost);
 
     fprintf(stderr, "Scan by key\n");
     thrust::inclusive_scan_by_key(thrust::device, dev_B, dev_B + symbol_count, dev_A, dev_A, thrust::equal_to<unsigned int>{}, thrust::plus<unsigned int>{});

@@ -44,80 +44,11 @@ __global__ void rlCompressKernel(unsigned char* input, long unsigned int input_s
 
 }
 
-//__global__ void rlPrescan(unsigned int* array, unsigned int* out, long unsigned int array_size)
-//{
-//	//extern __shared__ int temp[]; // allocated on invocation
-//	//int thid = threadIdx.x;
-//	//int pout = 0, pin = 1;
-//	//// Load input into shared memory.
-//	//// This is exclusive scan, so shift right by one
-//	//// and set first element to 0
-//	//temp[pout * array_size + thid] = (thid > 0) ? array[thid - 1] : 0;
-//	//__syncthreads();
-//	//for (int offset = 1; offset < array_size; offset *= 2)
-//	//{
-//	//	pout = 1 - pout; // swap double buffer indices
-//	//	pin = 1 - pout;
-//	//	if (thid >= offset)
-//	//		temp[pout * array_size + thid] += temp[pin * array_size + thid - offset];
-//	//	else
-//	//		temp[pout * array_size + thid] = temp[pin * array_size + thid];
-//	//	__syncthreads();
-//	//}
-//	//out[thid] = temp[pout * array_size + thid]; // write output
-//
-//
-//
-//
-//	extern __shared__ int temp[];
-//	int thid = threadIdx.x;
-//	int offset = 1;
-//	//if (thid >= array_size) return;
-//
-//	temp[2 * thid] = array[2 * thid]; // load input into shared memory
-//	temp[2*thid+1] = g_idata[2*thid+1];
-//
-//	for (int d = array_size >> 1; d > 0; d >>= 1)
-//		// build sum in place up the tree
-//	{
-//		__syncthreads();
-//		if (thid < d)
-//		{
-//			int ai = offset * (2 * thid + 1) - 1;
-//			int bi = offset * (2 * thid + 2) - 1;
-//
-//			temp[bi] += temp[ai];
-//		}
-//		offset *= 2;
-//	}
-//	if (thid == 0)
-//	{
-//		temp[array_size - 1] = 0;
-//	} // clear the last element
-//	for (int d = 1; d < array_size; d *= 2) // traverse down tree & build scan
-//	{
-//		offset >>= 1;
-//		__syncthreads();
-//		if (thid < d)
-//		{
-//			int ai = offset * (2 * thid + 1) - 1;
-//			int bi = offset * (2 * thid + 2) - 1;
-//			float t = temp[ai];
-//			temp[ai] = temp[bi];
-//			temp[bi] += t;
-//		}
-//	}
-//	__syncthreads();
-//
-//	out[2 * thid] = temp[2 * thid]; // write results to device memory
-//	out[2 * thid + 1] = temp[2 * thid + 1];
-//}
-
-__global__ void rlPrescan(unsigned int* array, unsigned int* out, long unsigned int array_size)
+__global__ void rlScan(unsigned int* array, long unsigned int array_size)
 {
 	extern __shared__ int temp[];
 	int thid = threadIdx.x;
-	//if (thid >= array_size) return;
+	array += blockIdx.x * blockDim.x;
 	int offset = 1;
 	int ai = thid;
 	int bi = thid + (array_size / 2);
