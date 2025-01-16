@@ -23,25 +23,9 @@ __global__ void rlCompressKernel(unsigned char* input, long unsigned int input_s
 	char areEqual = 1;
 	for (int j = 0; j < symbol_size; j++)
 	{
-		// HANDLE UNEVEN KERNELS
-		//if (i * symbol_size + j >= input_size)
-		//{
-		//	B[i] = 1;
-		//	return;
-		//}
 		areEqual *= (char)(input[i * symbol_size + j] == input[(i - 1) * symbol_size + j]);
 	}
 	B[i] = 1 - areEqual;
-
-	// Generate neighbor array
-	//if (i != 0)
-	//{
-	//	B[i] = 1 - (char)(input[i] == input[i - 1]);
-	//}
-	//else {
-	//	B[i] = 1;
-	//}
-
 }
 
 __global__ void rlScan(unsigned int* array, long unsigned int array_size)
@@ -100,7 +84,7 @@ __global__ void rlScan(unsigned int* array, long unsigned int array_size)
 	array[bi] += temp[bi + bankOffsetB];
 }
 
-__global__ void rlCollectResults(unsigned char* input, long unsigned int input_size, unsigned int symbol_size,  unsigned int* A, unsigned int* B, unsigned int* output_counts, unsigned char* output_symbols)
+__global__ void rlCollectResults(unsigned char* input, long unsigned int input_size, unsigned int symbol_size,  unsigned int* A, unsigned int* B, unsigned int* output_counts, unsigned char* output_symbols, unsigned int partition_size, unsigned int* repetitions)
 {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= input_size / symbol_size) return;
@@ -109,10 +93,37 @@ __global__ void rlCollectResults(unsigned char* input, long unsigned int input_s
 	unsigned int symbol_index = B[i] - 1;
 	//unsigned char bound = B[input_size / symbol_size - 1];
 	output_counts[symbol_index] = A[i];
+	repetitions[symbol_index] = A[i] / partition_size + 1 * (int)(A[i] % partition_size != 0); // ceiling
 	for (int j = 0; j < symbol_size; j++) {
 		unsigned int byte_index = symbol_index * symbol_size + j;
 		output_symbols[byte_index] = input[i * symbol_size + j];
 	}
+}
 
+__global__ void rlGenerateOutput(unsigned int bound, unsigned int symbol_size, unsigned char* output_symbols, unsigned int* output_counts, unsigned int partition_size, unsigned int* repetitions, unsigned int* repetitions_scan, unsigned char* output)
+{
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= bound) return;
+
+	unsigned int adj_bound = repetitions_scan[bound - 1] + repetitions[bound - 1];
+	unsigned int count = output_counts[i];
+
+	unsigned int remainder = count % partition_size;
+	if (remainder != 0)
+		output[repetitions_scan[i]] = count % partition_size;
+	else
+		output[repetitions_scan[i]] = partition_size;
+	for (int byte = 0; byte < symbol_size; byte++) {
+		output[adj_bound + repetitions_scan[i] * symbol_size + byte] = output_symbols[i * symbol_size + byte];
+	}
+
+	for (int rep = 1; rep < repetitions[i]; rep++)
+	{
+		output[repetitions_scan[i] + rep] = partition_size;
+		for (int byte = 0; byte < symbol_size; byte++)
+		{
+			output[adj_bound + (repetitions_scan[i] + rep) * symbol_size + byte] = output_symbols[i * symbol_size + byte];
+		}
+	}
 }
 
