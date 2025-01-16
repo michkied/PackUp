@@ -5,4 +5,4 @@
 
 #include <vector>
 
-cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<unsigned char>& output);
+cudaError_t run_length_compress(unsigned char* input, long unsigned int input_size, std::vector<unsigned char>& output);

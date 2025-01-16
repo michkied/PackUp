@@ -14,18 +14,25 @@ int main(int argc, char* argv[])
        //if (argv[1][0] != 'c' && argv[1][0] != 'd') PRINT_USAGE;
        //if (argv[2][0] != 'f' && argv[2][0] != 'r') PRINT_USAGE;
 
-    std::ifstream input_file("input.txt", std::ios::in | std::ios::binary);
-    std::ofstream output_file("output.txt", std::ios::out | std::ios::binary);
+    std::ifstream input_file("test_files/input.txt", std::ios::in | std::ios::binary);
+    std::ofstream output_file("test_files/output.txt", std::ios::out | std::ios::binary);
     if (!input_file || !output_file) {
         return 1;
     }
-    std::vector<unsigned char> input(std::istreambuf_iterator<char>{input_file}, {});
+    long unsigned int input_size;
+	input_file.seekg(0, std::ios::end);
+	input_size = input_file.tellg();
+    input_file.seekg(0, std::ios::beg);
+	unsigned char* input = new unsigned char[input_size];
+	input_file.read(reinterpret_cast<char*>(input), input_size);
+    
     std::vector<unsigned char> output;
 
     input_file.close();
 
-	auto compressed = run_length_compress(input, output);
+	auto compressed = run_length_compress(input, input_size, output);
     output_file.write(reinterpret_cast<const char*>(output.data()), output.size());
+	output_file.close();
 
     //const int arraySize = 5;
     //const int a[arraySize] = { 1, 2, 3, 4, 5 };

@@ -8,18 +8,18 @@
 #include <thrust/execution_policy.h>
 #include "thrust/scan.h"
 
-cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<unsigned char>& output) {
+cudaError_t run_length_compress(unsigned char* input, long unsigned int input_size, std::vector<unsigned char>& output) {
     unsigned char* dev_input;
     unsigned int* dev_output_counts;
     unsigned char* dev_output_symbols;
     unsigned int* dev_A;
 	unsigned int* dev_B;
-	unsigned int host_output_counts[100];
-	unsigned char host_output_symbols[100];
-    unsigned char bound;
+    unsigned int* dev_B_scan;
+    unsigned int bound;
 
     unsigned int symbol_size = 3;
-	unsigned int symbol_count = input.size() / symbol_size;
+	unsigned int threads_per_block = 256;
+	unsigned int symbol_count = input_size / symbol_size;
 
     cudaError_t cudaStatus;
 
@@ -29,7 +29,7 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
         return cudaStatus;
     }
 
-    cudaStatus = cudaMalloc((void**)&dev_input, input.size());
+    cudaStatus = cudaMalloc((void**)&dev_input, input_size);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
         return cudaStatus;
@@ -64,8 +64,17 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
         cudaFree(dev_A);
         return cudaStatus;
     }
+    //cudaStatus = cudaMalloc((void**)&dev_B_scan, symbol_count * sizeof(int));
+    //if (cudaStatus != cudaSuccess) {
+    //    fprintf(stderr, "cudaMalloc failed!");
+    //    cudaFree(dev_input);
+    //    cudaFree(dev_output_counts);
+    //    cudaFree(dev_output_symbols);
+    //    cudaFree(dev_A);
+    //    return cudaStatus;
+    //}
 
-	cudaStatus = cudaMemcpy(dev_input, input.data(), input.size(), cudaMemcpyHostToDevice);
+	cudaStatus = cudaMemcpy(dev_input, input, input_size, cudaMemcpyHostToDevice);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy failed!");
         cudaFree(dev_input);
@@ -76,7 +85,8 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
 		return cudaStatus;
 	}
 
-	rlCompressKernel << <1, input.size() / symbol_size >> > (dev_input, input.size(), symbol_size, dev_A, dev_B);
+	fprintf(stderr, "Preparing neighbor arrays\n");
+	rlCompressKernel << <symbol_count / threads_per_block + 1, threads_per_block >> > (dev_input, input_size, symbol_size, dev_A, dev_B);
 
     // Check for any errors launching the kernel
     cudaStatus = cudaGetLastError();
@@ -102,11 +112,39 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
         cudaFree(dev_B);
         return cudaStatus;
     }
+    fprintf(stderr, "   Done\n");
 
-	thrust::inclusive_scan(thrust::device, dev_B, dev_B + input.size(), dev_B);
-    thrust::inclusive_scan_by_key(thrust::device, dev_B, dev_B + input.size(), dev_A, dev_A, thrust::equal_to<unsigned char>{}, thrust::plus<unsigned char>{});
+    fprintf(stderr, "Scan\n");
+	thrust::inclusive_scan(thrust::device, dev_B, dev_B + symbol_count, dev_B);
+	//rlPrescan << < symbol_count / threads_per_block + 1, threads_per_block >> > (dev_B, dev_B_scan, symbol_count);
+ //   cudaStatus = cudaGetLastError();
+ //   if (cudaStatus != cudaSuccess) {
+ //       fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+ //       cudaFree(dev_input);
+ //       cudaFree(dev_output_counts);
+ //       cudaFree(dev_output_symbols);
+ //       cudaFree(dev_A);
+ //       cudaFree(dev_B);
+ //       return cudaStatus;
+ //   }
+ //   cudaStatus = cudaDeviceSynchronize();
+ //   if (cudaStatus != cudaSuccess) {
+ //       fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+ //       cudaFree(dev_input);
+ //       cudaFree(dev_output_counts);
+ //       cudaFree(dev_output_symbols);
+ //       cudaFree(dev_A);
+ //       cudaFree(dev_B);
+ //       return cudaStatus;
+ //   }
+    fprintf(stderr, "   Done\n");
 
-	rlCollectResults << <1, input.size() / symbol_size >> > (dev_input, input.size(), symbol_size, dev_A, dev_B, dev_output_counts, dev_output_symbols);
+    fprintf(stderr, "Scan by key\n");
+    thrust::inclusive_scan_by_key(thrust::device, dev_B, dev_B + symbol_count, dev_A, dev_A, thrust::equal_to<unsigned int>{}, thrust::plus<unsigned int>{});
+    fprintf(stderr, "   Done\n");
+
+    fprintf(stderr, "Collecting results\n");
+	rlCollectResults << <symbol_count / threads_per_block + 1, threads_per_block >> > (dev_input, input_size, symbol_size, dev_A, dev_B, dev_output_counts, dev_output_symbols);
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
@@ -127,11 +165,14 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
         cudaFree(dev_B);
         return cudaStatus;
     }
+    fprintf(stderr, "   Done\n");
 
     // Copy output vector from GPU buffer to host memory.
-    cudaStatus = cudaMemcpy(&bound, dev_B + symbol_count - 1, 1, cudaMemcpyDeviceToHost);
-    cudaStatus = cudaMemcpy(host_output_counts, dev_output_counts, symbol_count * sizeof(int), cudaMemcpyDeviceToHost);
-    cudaStatus = cudaMemcpy(host_output_symbols, dev_output_symbols, symbol_count, cudaMemcpyDeviceToHost);
+    cudaStatus = cudaMemcpy(&bound, dev_B + symbol_count - 1, sizeof(int), cudaMemcpyDeviceToHost);
+    unsigned int* host_output_counts = new unsigned int[bound];
+    unsigned char* host_output_symbols = new unsigned char[bound * symbol_size];
+    cudaStatus = cudaMemcpy(host_output_counts, dev_output_counts, bound * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaStatus = cudaMemcpy(host_output_symbols, dev_output_symbols, bound * symbol_size, cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy failed!");
         cudaFree(dev_input);
@@ -148,9 +189,13 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
     cudaFree(dev_A);
     cudaFree(dev_B);
 
+	//output.push_back(bound);
+
+    // Push counts
+    fprintf(stderr, "Partitioning & pushing counts\n");
     int partition_size = 255;
 	int* repetitions = new int[bound];
-	for (int i = 0; i < bound; i++) {
+	for (unsigned int i = 0; i < bound; i++) {
 		repetitions[i] = 0;
 		while (host_output_counts[i] > partition_size)
         {
@@ -164,19 +209,29 @@ cudaError_t run_length_compress(std::vector<unsigned char>& input, std::vector<u
 			repetitions[i]++;
         }
 	}
+    fprintf(stderr, "   Done\n");
 
-	for (int i = 0; i < bound; i++)
+    // Push symbols
+    fprintf(stderr, "Pushing symbols\n");
+	for (unsigned int i = 0; i < bound; i++)
     {
 		for (int rep = 0; rep < repetitions[i]; rep++)
 		{
-			for (int j = 0; j < symbol_size; j++)
+			for (unsigned int j = 0; j < symbol_size; j++)
 			{
 				output.push_back(host_output_symbols[i * symbol_size + j]);
 			}
 		}
 	}
+    fprintf(stderr, "   Done\n");
+    delete[] repetitions;
 
-	delete[] repetitions;
+	// If symbol size doesn't evenly divide input size, push the remaining symbols
+	int remaining_symbols = input_size % symbol_size;
+	for (int i = 0; i < remaining_symbols; i++)
+	{
+		output.push_back(input[input_size - remaining_symbols + i]);
+	}
 
     return cudaStatus;
 }
