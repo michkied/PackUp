@@ -14,7 +14,7 @@ int main(int argc, char* argv[])
        //if (argv[1][0] != 'c' && argv[1][0] != 'd') PRINT_USAGE;
        //if (argv[2][0] != 'f' && argv[2][0] != 'r') PRINT_USAGE;
 
-    std::ifstream input_file("test_files/input.txt", std::ios::in | std::ios::binary);
+    std::ifstream input_file("test_files/input2.txt", std::ios::in | std::ios::binary);
     std::ofstream output_file("test_files/output.txt", std::ios::out | std::ios::binary);
     if (!input_file || !output_file) {
         return 1;
