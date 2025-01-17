@@ -8,7 +8,7 @@
 #define LOG_NUM_BANKS 4
 #define CONFLICT_FREE_OFFSET(n)((n) >> NUM_BANKS + (n) >> (2 * LOG_NUM_BANKS))
 
-__global__ void rlCompressKernel(unsigned char* input, long unsigned int input_size, unsigned int symbol_size, unsigned int* A, unsigned int* B)
+__global__ void rlNeighborArrays(unsigned char* input, long unsigned int input_size, unsigned int symbol_size, unsigned int* A, unsigned int* B)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= input_size / symbol_size) return;
