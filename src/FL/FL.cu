@@ -9,9 +9,11 @@
 
 cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size) 
 {
-	unsigned int frame_size_B = 2;
+	unsigned int frame_size_B = 8;
 	unsigned int frame_size_b = frame_size_B * 8;
 	unsigned int frame_count = input_size / frame_size_B;
+
+	// TODO: Perform compression only if first bit of the frame is 0
 
 	// Precompute helper arrays
 	unsigned int thread_count = 0;
@@ -38,6 +40,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	unsigned int* dev_insig_bits_count;
 	unsigned int* dev_division_ends;
 	unsigned int* dev_division_zeros;
+	unsigned char* dev_output;
 	cudaError_t cudaStatus = cudaSuccess;
 
 	cudaStatus = cudaSetDevice(0);
@@ -101,7 +104,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	}
 
 	// Find the number of insignificant bits in each segment
-	flFindInsigBits << <1, thread_count >> > (dev_input + 4, frame_size_B, dev_seg_sizes, dev_seg_offsets, dev_insig_bits_count);
+	flFindInsigBits << <1, thread_count >> > (dev_input, frame_size_B, dev_seg_sizes, dev_seg_offsets, dev_insig_bits_count);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "flFindInsigBits launch failed: %s\n", cudaGetErrorString(cudaStatus));
@@ -141,33 +144,71 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flFindInsigBits!\n", cudaStatus);
 		goto Cleanup;
 	}
-	unsigned int* debug = new unsigned int[divisions_count];
-	cudaStatus = cudaMemcpy(debug, dev_division_zeros, divisions_count * sizeof(int), cudaMemcpyDeviceToHost);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Cleanup;
-	}
+	//unsigned int* debug = new unsigned int[divisions_count];
+	//cudaStatus = cudaMemcpy(debug, dev_division_zeros, divisions_count * sizeof(int), cudaMemcpyDeviceToHost);
+	//if (cudaStatus != cudaSuccess) {
+	//	fprintf(stderr, "cudaMemcpy failed!");
+	//	goto Cleanup;
+	//}
 
 	unsigned int* dev_max_elem = thrust::max_element(thrust::device, dev_division_zeros, dev_division_zeros + divisions_count);
 	unsigned int max_elem_index = dev_max_elem - dev_division_zeros;
-	unsigned int best_seg_index;
+
+	unsigned int best_seg_index, total_zeros_removed, best_seg_size, insig_zeros;
 	cudaStatus = cudaMemcpy(&best_seg_index, dev_division_ends + max_elem_index, sizeof(int), cudaMemcpyDeviceToHost);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
 	}
-
-	unsigned int best_seg_size;
+	cudaStatus = cudaMemcpy(&total_zeros_removed, dev_max_elem, sizeof(int), cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Cleanup;
+	}
 	cudaStatus = cudaMemcpy(&best_seg_size, dev_seg_sizes + best_seg_index - 1, sizeof(int), cudaMemcpyDeviceToHost);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
 	}
+	cudaStatus = cudaMemcpy(&insig_zeros, dev_insig_bits_count + best_seg_index - 1, sizeof(int), cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Cleanup;
+	}
+
+	// Produce output
+	unsigned int output_size_b = (best_seg_size - insig_zeros) * (frame_size_b / best_seg_size);
+	output_size = output_size_b / 8 + (output_size_b % 8 != 0);
+	output = new unsigned char[output_size];
+	cudaStatus = cudaMalloc((void**)&dev_output, output_size + output_size % 4);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMalloc failed!");
+		goto Cleanup;
+	}
+	cudaStatus = cudaMemset(dev_output, 0, output_size + output_size % 4);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemset failed!");
+		goto Cleanup;
+	}
+
+	// frame_size_b / best_seg_size
+	flProduceOutput << <1, frame_size_b / best_seg_size >> > (dev_input, best_seg_size, insig_zeros, dev_output);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "flProduceOutput launch failed: %s\n", cudaGetErrorString(cudaStatus));
+		goto Cleanup;
+	}
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flProduceOutput!\n", cudaStatus);
+		goto Cleanup;
+	}
 	
-
-
-
-
+	cudaStatus = cudaMemcpy(output, dev_output, output_size, cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Cleanup;
+	}
 
 Cleanup:
 	cudaFree(dev_input);
@@ -176,6 +217,7 @@ Cleanup:
 	cudaFree(dev_insig_bits_count);
 	cudaFree(dev_division_ends);
 	cudaFree(dev_division_zeros);
+	cudaFree(dev_output);
 
 	return cudaStatus;
 }
