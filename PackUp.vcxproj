@@ -81,10 +81,14 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <CudaCompile Include="src\FL\FL.cu" />
+    <CudaCompile Include="src\FL\FLkernels.cu" />
     <CudaCompile Include="src\RL\kernels.cu" />
     <CudaCompile Include="src\RL\RL.cu" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="include\FL\FL.h" />
+    <ClInclude Include="include\FL\FLkernels.h" />
     <ClInclude Include="include\RL\kernels.h" />
     <ClInclude Include="include\RL\RL.h" />
   </ItemGroup>

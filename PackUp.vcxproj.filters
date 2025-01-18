@@ -3,10 +3,14 @@
   <ItemGroup>
     <CudaCompile Include="src\RL\kernels.cu" />
     <CudaCompile Include="src\RL\RL.cu" />
+    <CudaCompile Include="src\FL\FL.cu" />
+    <CudaCompile Include="src\FL\FLkernels.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\RL\kernels.h" />
     <ClInclude Include="include\RL\RL.h" />
+    <ClInclude Include="include\FL\FLkernels.h" />
+    <ClInclude Include="include\FL\FL.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />

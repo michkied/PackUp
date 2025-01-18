@@ -212,10 +212,6 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
     }
     output[0] = symbol_size;
     std::memcpy(output + 1, &adjusted_bound, 4);
-    //output[1] = adjusted_bound & 255;
-    //output[2] = (adjusted_bound >> 8) & 255;
-    //output[3] = (adjusted_bound >> 16) & 255;
-    //output[4] = (adjusted_bound >> 24) & 255;
     for (int i = 0; i < remaining_symbols_size; i++)
     {
         output[output_size - remaining_symbols_size + i] = input[input_size - remaining_symbols_size + i];
