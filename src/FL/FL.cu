@@ -177,7 +177,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	}
 
 	// Produce output
-	unsigned int output_size_b = (best_seg_size - insig_zeros) * (frame_size_b / best_seg_size);
+	unsigned int output_size_b = frame_size_b - total_zeros_removed;
 	output_size = output_size_b / 8 + (output_size_b % 8 != 0);
 	output = new unsigned char[output_size];
 	cudaStatus = cudaMalloc((void**)&dev_output, output_size + output_size % 4);
@@ -191,7 +191,6 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		goto Cleanup;
 	}
 
-	// frame_size_b / best_seg_size
 	flProduceOutput << <1, frame_size_b / best_seg_size >> > (dev_input, best_seg_size, insig_zeros, dev_output);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
@@ -208,6 +207,29 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
+	}
+
+	// Factor in the remainder
+	unsigned int remainder_size = frame_size_b % best_seg_size;
+	if (remainder_size != 0)
+	{
+		unsigned int remainder_zeros = insig_zeros;
+		if (insig_zeros >= remainder_size)
+		{
+			remainder_zeros = remainder_size - 1;
+		}
+		unsigned int remainder_offset = frame_size_b - remainder_size;
+		unsigned int output_offset = output_size_b - remainder_size + remainder_zeros;
+		for (unsigned int bit_num = 0; bit_num < remainder_size - remainder_zeros; ++bit_num)
+		{
+			unsigned int bit_offset = remainder_offset + remainder_zeros + bit_num;
+			unsigned char bit = input[bit_offset / 8] & (1 << (7 - (bit_offset % 8)));
+			if (bit != 0)
+			{
+				output[output_offset / 8] |= ((bit != 0) << (7 - (output_offset % 8)));
+			}
+			++output_offset;
+		}
 	}
 
 Cleanup:

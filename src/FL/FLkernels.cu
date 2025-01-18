@@ -84,7 +84,6 @@ __global__ void flProduceOutput(unsigned char* frame, unsigned int seg_size, uns
 		unsigned char bit = frame[bit_offset / 8] & (1 << (7 - (bit_offset % 8)));
 		
 		unsigned int output_bit_offset = output_offset + bit_num;
-		//output[output_bit_offset / 8] |= (bit != 0) << (7 - (output_bit_offset % 8));
 		atomicOrChar(output + output_bit_offset / 8, (bit != 0) << (7 - (output_bit_offset % 8)));
 	}
 }
