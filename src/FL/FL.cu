@@ -181,7 +181,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
 	}
-	unsigned int compressed_size_b = input_size * 8 - totals.removed_zeros;
+	unsigned int compressed_size_b = frame_size_b * frame_count - totals.removed_zeros;
 	output_size = compressed_size_b / 8 + (compressed_size_b % 8 != 0) + input_size % frame_size_B;
 	output = new unsigned char[output_size];
 	cudaStatus = cudaMalloc((void**)&dev_output, output_size + output_size % 4);  // Add padding to ensure that the output size is a multiple of 4 (necessary for atomicCAS)
