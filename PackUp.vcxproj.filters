@@ -11,6 +11,7 @@
     <ClInclude Include="include\RL\RL.h" />
     <ClInclude Include="include\FL\FLkernels.h" />
     <ClInclude Include="include\FL\FL.h" />
+    <ClInclude Include="include\FL\types.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />

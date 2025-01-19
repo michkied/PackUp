@@ -87,6 +87,7 @@
     <CudaCompile Include="src\RL\RL.cu" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="include\FL\types.hpp" />
     <ClInclude Include="include\FL\FL.h" />
     <ClInclude Include="include\FL\FLkernels.h" />
     <ClInclude Include="include\RL\kernels.h" />
