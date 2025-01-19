@@ -17,14 +17,14 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	unsigned int frame_size_B = 2;
 	unsigned int frame_size_b = frame_size_B * 8;
 	unsigned int frame_count = input_size / frame_size_B;
-	unsigned int threads_per_block = 256;
+	unsigned int threads_per_block = 1024;
 
 	// Precompute helper arrays
+	fprintf(stderr, "Precomputing helper arrays\n");
 	unsigned int seg_count = 0;
 	unsigned int divisions_count = 0;
 	std::vector<unsigned int> seg_sizes;
 	std::vector<unsigned int> seg_offsets;
-	std::vector<unsigned int> division_end_offsets;
 	for (unsigned int seg_size = 2; seg_size <= frame_size_b; ++seg_size)
 	{
 		unsigned int threads = frame_size_b / seg_size + (unsigned int)(frame_size_b % seg_size != 0);
@@ -35,18 +35,18 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		}
 		seg_count += threads;
 		++divisions_count;
-		division_end_offsets.push_back(seg_count);
 	}
+	fprintf(stderr, "    Done\n");
 
-	unsigned char* dev_input;
-	unsigned int* dev_seg_sizes;
-	unsigned int* dev_seg_offsets;
-	unsigned int* dev_insig_bits_count;
-	unsigned int* dev_division_seg_sizes;
-	unsigned int* dev_division_zeros;
-	DivisionWrapper* dev_divisions;
-	DivisionWrapper* dev_division_scan;
-	unsigned char* dev_output;
+	unsigned char* dev_input = nullptr;
+	unsigned int* dev_seg_sizes = nullptr;
+	unsigned int* dev_seg_offsets = nullptr;
+	unsigned int* dev_insig_bits_count = nullptr;
+	unsigned int* dev_division_seg_sizes = nullptr;
+	unsigned int* dev_division_zeros = nullptr;
+	DivisionWrapper* dev_divisions = nullptr;
+	DivisionWrapper* dev_division_scan = nullptr;
+	unsigned char* dev_output = nullptr;
 	cudaError_t cudaStatus = cudaSuccess;
 
 	cudaStatus = cudaSetDevice(0);
@@ -56,6 +56,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	}
 
 	// Allocate memory
+	fprintf(stderr, "Allocating memory and copying data\n");
 	cudaStatus = cudaMalloc((void**)&dev_input, input_size);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc failed!");
@@ -86,16 +87,6 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		fprintf(stderr, "cudaMalloc failed!");
 		goto Cleanup;
 	}
-	cudaStatus = cudaMalloc((void**)&dev_divisions, divisions_count * frame_count * sizeof(DivisionWrapper));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Cleanup;
-	}
-	cudaStatus = cudaMalloc((void**)&dev_division_scan, frame_count * sizeof(DivisionWrapper));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Cleanup;
-	}
 
 	// Copy data to device
 	cudaStatus = cudaMemcpy(dev_input, input, input_size, cudaMemcpyHostToDevice);
@@ -113,10 +104,12 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
 	}
+	fprintf(stderr, "    Done\n");
 
 	// Find the number of insignificant bits in each segment
-	// Each block is one-dimensional and each row of blocks processes one frame. The y coordinate of the block is the frame number.
-	flFindInsigBits << < dim3{ seg_count / threads_per_block + 1, frame_count }, threads_per_block >> > (seg_count, dev_input, frame_size_B, dev_seg_sizes, dev_seg_offsets, dev_insig_bits_count);
+	// Each block is one-dimensional and each row of blocks processes one frame. The x coordinate of the block is the frame number.
+	fprintf(stderr, "Finding insignificant bits for every division\n");
+	flFindInsigBits << < dim3{ frame_count, seg_count / threads_per_block + 1 }, dim3{ 1, threads_per_block } >> > (seg_count, dev_input, frame_size_B, dev_seg_sizes, dev_seg_offsets, dev_insig_bits_count);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "flFindInsigBits launch failed: %s\n", cudaGetErrorString(cudaStatus));
@@ -127,21 +120,42 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flFindInsigBits!\n", cudaStatus);
 		goto Cleanup;
 	}
+	fprintf(stderr, "    Done\n");
 
 	// Find minimums within each division for each frame
+	fprintf(stderr, "Finding minimums within divisions\n");
 	thrust::reduce_by_key(
 		thrust::device,
 		CyclicIterator(dev_seg_sizes, seg_count),
-		CyclicIterator(dev_seg_sizes, seg_count, frame_count* seg_count),
+		CyclicIterator(dev_seg_sizes, seg_count, frame_count * seg_count),
 		dev_insig_bits_count,
 		dev_division_seg_sizes,
 		dev_division_zeros,
 		thrust::equal_to<unsigned int>{},
 		thrust::minimum<unsigned int>{}
 	);
+	fprintf(stderr, "    Done\n");
+
+	// Free memory that is no longer needed
+	cudaFree(dev_seg_offsets);
+	cudaFree(dev_seg_sizes);
+	cudaFree(dev_insig_bits_count);
+
+	// Allocate memory for division wrappers
+	cudaStatus = cudaMalloc((void**)&dev_divisions, divisions_count * frame_count * sizeof(DivisionWrapper));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMalloc failed!");
+		goto Cleanup;
+	}
+	cudaStatus = cudaMalloc((void**)&dev_division_scan, frame_count * sizeof(DivisionWrapper));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMalloc failed!");
+		goto Cleanup;
+	}
 
 	// Compute the number of insignificant zeros removed by each division
-	flComputeNumOfZeros << < dim3{ divisions_count / threads_per_block + 1, frame_count }, threads_per_block >> > (divisions_count, dev_division_zeros, dev_division_seg_sizes, frame_size_b, dev_divisions);
+	fprintf(stderr, "Computing the number of insignificant zeros removed by each division\n");
+	flComputeNumOfZeros << < dim3{ frame_count, divisions_count / threads_per_block + 1 }, dim3{ 1, threads_per_block } >> > (divisions_count, dev_division_zeros, dev_division_seg_sizes, frame_size_b, dev_divisions);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "flFindInsigBits launch failed: %s\n", cudaGetErrorString(cudaStatus));
@@ -152,8 +166,10 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flFindInsigBits!\n", cudaStatus);
 		goto Cleanup;
 	}
+	fprintf(stderr, "    Done\n");
 
 	// Find the division with the most zeros removed for each frame
+	fprintf(stderr, "Fiding best division\n");
 	thrust::reduce_by_key(
 		thrust::device,
 		CyclicIterator(divisions_count),
@@ -164,8 +180,10 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		thrust::less_equal<unsigned int>{},
 		thrust::maximum<DivisionWrapper>{}
 	);
+	fprintf(stderr, "    Done\n");
 
-	// Compute the prefix sum of removed zeros
+	// Compute the prefix sum of best divisions
+	fprintf(stderr, "Computing the prefix sum of best divisions\n");
 	thrust::inclusive_scan(
 		thrust::device,
 		dev_divisions,
@@ -173,8 +191,10 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		dev_division_scan,
 		thrust::plus<DivisionWrapper>{}
 	);
+	fprintf(stderr, "    Done\n");
 
 	// Produce output
+	fprintf(stderr, "Producing output\n");
 	DivisionWrapper totals;
 	cudaStatus = cudaMemcpy(&totals, dev_division_scan + frame_count - 1, sizeof(DivisionWrapper), cudaMemcpyDeviceToHost);
 	if (cudaStatus != cudaSuccess) {
@@ -202,7 +222,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		goto Cleanup;
 	}
 
-	flProduceOutput << < dim3{ (frame_size_b / 2) / threads_per_block + 1, frame_count }, threads_per_block >> > (dev_input, dev_divisions, dev_division_scan, frame_size_b, dev_output, header_array_size);
+	flProduceOutput << < dim3{ frame_count, (frame_size_b / 2) / threads_per_block + 1 }, dim3{ 1, threads_per_block } >> > (dev_input, dev_divisions, dev_division_scan, frame_size_b, dev_output, header_array_size);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "flProduceOutput launch failed: %s\n", cudaGetErrorString(cudaStatus));
@@ -231,6 +251,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flProduceOutput and flIncludeRemainders!\n", cudaStatus);
 		goto Cleanup;
 	}
+	fprintf(stderr, "    Done\n");
 	
 	// Copy output to host
 	cudaStatus = cudaMemcpy(output + header_info_size, dev_output, gpu_output_size, cudaMemcpyDeviceToHost);

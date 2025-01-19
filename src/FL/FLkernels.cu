@@ -27,10 +27,10 @@ __global__ void flFindInsigBits(unsigned int seg_count, unsigned char* input, un
 {
 	//extern __shared__ int temp[];
 
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	int i = blockIdx.y * blockDim.y + threadIdx.y;
 	if (i >= seg_count) return;
 
-	input += blockIdx.y * frame_size_B; // move pointer to the beginning of the frame
+	input += blockIdx.x * frame_size_B; // move pointer to the beginning of the frame
 
 	unsigned int seg_size = seg_sizes[i];
 	unsigned int seg_offset = seg_offsets[i];
@@ -51,15 +51,15 @@ __global__ void flFindInsigBits(unsigned int seg_count, unsigned char* input, un
 		++insig_bits_count;
 	}
 
-	insig_bits[blockIdx.y * seg_count + i] = insig_bits_count;
+	insig_bits[blockIdx.x * seg_count + i] = insig_bits_count;
 }
 
 __global__ void flComputeNumOfZeros(unsigned int divisions_count, unsigned int* division_zeros, unsigned int* division_seg_sizes, unsigned int frame_size_b, DivisionWrapper* output)
 {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	int i = blockIdx.y * blockDim.y + threadIdx.y;
 	if (i >= divisions_count) return;
 
-	unsigned int frame_offset = blockIdx.y * divisions_count;
+	unsigned int frame_offset = blockIdx.x * divisions_count;
 
 	unsigned int seg_size = division_seg_sizes[i];
 	unsigned int minimum = division_zeros[frame_offset + i];
@@ -84,11 +84,11 @@ __global__ void flComputeNumOfZeros(unsigned int divisions_count, unsigned int* 
 
 __global__ void flProduceOutput(unsigned char* input, DivisionWrapper* divisions, DivisionWrapper* totals, unsigned int frame_size_b, unsigned char* output, unsigned int header_array_size)
 {
-	int frame_num = blockIdx.y;
+	int frame_num = blockIdx.x;
 	DivisionWrapper division = divisions[frame_num];
 	unsigned int seg_size = division.seg_size;
 
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	int i = blockIdx.y * blockDim.y + threadIdx.y;
 	if (i >= frame_size_b / seg_size) return;
 
 	unsigned int insig_zeros = division.insig_zeros;
