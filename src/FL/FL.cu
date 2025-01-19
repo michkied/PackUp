@@ -181,28 +181,34 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
 	}
-	unsigned int header_size = 4 + frame_count * (2 + 2); // 4 bytes for frame count, 2 bytes per frame for out size, 2 bytes per frame for insig zeros
+
+	unsigned int header_info_size = 4 + 2; // 4 bytes for frame count, 2 bytes for frame size
+	unsigned int header_array_size = frame_count * (2 + 2); // 2 bytes per frame for out segment size, 2 bytes per frame for insig zeros
+	unsigned int header_size = header_info_size + header_array_size; 
+
 	unsigned int compressed_size_b = frame_size_b * frame_count - totals.removed_zeros;
-	output_size = header_size + compressed_size_b / 8 + (compressed_size_b % 8 != 0) + input_size % frame_size_B;
+	unsigned int gpu_output_size = header_array_size + compressed_size_b / 8 + (compressed_size_b % 8 != 0);
+
+	output_size = header_info_size + gpu_output_size + input_size % frame_size_B;
 	output = new unsigned char[output_size];
-	cudaStatus = cudaMalloc((void**)&dev_output, output_size + output_size % 4);  // Add padding to ensure that the output size is a multiple of 4 (necessary for atomicCAS)
+	cudaStatus = cudaMalloc((void**)&dev_output, gpu_output_size + gpu_output_size % 4);  // Add padding to ensure that the output size is a multiple of 4 (necessary for atomicCAS)
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc failed!");
 		goto Cleanup;
 	}
-	cudaStatus = cudaMemset(dev_output, 0, output_size + output_size % 4);
+	cudaStatus = cudaMemset(dev_output, 0, gpu_output_size + gpu_output_size % 4);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemset failed!");
 		goto Cleanup;
 	}
 
-	flProduceOutput << < dim3{ (frame_size_b / 2) / threads_per_block + 1, frame_count }, threads_per_block >> > (dev_input, dev_divisions, dev_division_scan, frame_size_b, dev_output, header_size);
+	flProduceOutput << < dim3{ (frame_size_b / 2) / threads_per_block + 1, frame_count }, threads_per_block >> > (dev_input, dev_divisions, dev_division_scan, frame_size_b, dev_output, header_array_size);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "flProduceOutput launch failed: %s\n", cudaGetErrorString(cudaStatus));
 		goto Cleanup;
 	}
-	flHandleRemainders << < frame_count / threads_per_block + 1, threads_per_block >> > (frame_count, dev_input, dev_divisions, dev_division_scan, frame_size_b, dev_output, header_size);
+	flAddHeadersAndRemainders << < frame_count / threads_per_block + 1, threads_per_block >> > (frame_count, dev_input, dev_divisions, dev_division_scan, frame_size_b, dev_output, header_array_size);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "flIncludeRemainders launch failed: %s\n", cudaGetErrorString(cudaStatus));
@@ -215,6 +221,11 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		output[output_size - i] = input[input_size - i];
 	}
 
+	// Add header info
+	std::memcpy(output, &frame_count, 4);
+	std::memcpy(output + 4, &frame_size_B, 2);
+
+	// Synchronize
 	cudaStatus = cudaDeviceSynchronize();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flProduceOutput and flIncludeRemainders!\n", cudaStatus);
@@ -222,7 +233,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	}
 	
 	// Copy output to host
-	cudaStatus = cudaMemcpy(output, dev_output, output_size - input_size % frame_size_B, cudaMemcpyDeviceToHost);
+	cudaStatus = cudaMemcpy(output + header_info_size, dev_output, gpu_output_size, cudaMemcpyDeviceToHost);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
