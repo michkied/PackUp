@@ -82,7 +82,7 @@ __global__ void flComputeNumOfZeros(unsigned int divisions_count, unsigned int* 
 	output[frame_offset + i] = DivisionWrapper(regular_zeros + remainder_zeros, seg_size, minimum);
 }
 
-__global__ void flProduceOutput(unsigned char* input, DivisionWrapper* divisions, DivisionWrapper* totals, unsigned int frame_size_b, unsigned char* output)
+__global__ void flProduceOutput(unsigned char* input, DivisionWrapper* divisions, DivisionWrapper* totals, unsigned int frame_size_b, unsigned char* output, unsigned int header_size)
 {
 	int frame_num = blockIdx.y;
 	DivisionWrapper division = divisions[frame_num];
@@ -93,7 +93,7 @@ __global__ void flProduceOutput(unsigned char* input, DivisionWrapper* divisions
 
 	unsigned int insig_zeros = division.insig_zeros;
 	unsigned int frame_offset_b = frame_size_b * frame_num;
-	unsigned int output_frame_offset_b = frame_offset_b - (totals[frame_num].removed_zeros - division.removed_zeros);  // since totals is an inclusive scan, we need to subtract current removed zeros
+	unsigned int output_frame_offset_b = header_size * 8 + frame_offset_b - (totals[frame_num].removed_zeros - division.removed_zeros);  // since totals is an inclusive scan, we need to subtract current removed zeros
 
 	unsigned int seg_offset = frame_offset_b + i * seg_size;
 	unsigned int output_offset = output_frame_offset_b + i * (seg_size - insig_zeros);
@@ -107,14 +107,14 @@ __global__ void flProduceOutput(unsigned char* input, DivisionWrapper* divisions
 	}
 }
 
-__global__ void flHandleRemainders(unsigned int frame_count, unsigned char* input, DivisionWrapper* divisions, DivisionWrapper* totals, unsigned int frame_size_b, unsigned char* output) 
+__global__ void flHandleRemainders(unsigned int frame_count, unsigned char* input, DivisionWrapper* divisions, DivisionWrapper* totals, unsigned int frame_size_b, unsigned char* output, unsigned int header_size) 
 {
 	int frame_num = blockIdx.x * blockDim.x + threadIdx.x;
 	if (frame_num >= frame_count) return;
 
 	DivisionWrapper division = divisions[frame_num];
 	unsigned int frame_offset_b = frame_size_b * frame_num;
-	unsigned int output_frame_offset_b = frame_offset_b - (totals[frame_num].removed_zeros - division.removed_zeros);
+	unsigned int output_frame_offset_b = header_size * 8 + frame_offset_b - (totals[frame_num].removed_zeros - division.removed_zeros);
 
 	unsigned int remainder_size = frame_size_b % division.seg_size;
 	if (remainder_size == 0) return;
