@@ -6,31 +6,42 @@
 #include "FL/types.hpp"
 
 __device__ char atomicOrChar(unsigned char* address, char val) {
-	// Calculate the location of the `char` within its containing `int`
-	unsigned int* baseAddress = (unsigned int*)((uintptr_t)address & ~3); // Align to 4 bytes
-	unsigned int shift = ((uintptr_t)address & 3) * 8;                   // Offset in bits
-	unsigned int mask = 0xFF << shift;                                  // Mask for the `char`
+	unsigned int* baseAddress = (unsigned int*)((uintptr_t)address & ~3);
+	unsigned int shift = ((uintptr_t)address & 3) * 8;
+	unsigned int mask = 0xFF << shift;
 
 	unsigned int old, assumed, newVal;
 	do {
-		old = *baseAddress; // Load the full 4-byte word
-		char currentVal = (old & mask) >> shift; // Extract the current `char`
-		currentVal |= val; // Apply the OR operation
-		newVal = (old & ~mask) | ((currentVal & 0xFF) << shift); // Construct the new word
-		assumed = atomicCAS(baseAddress, old, newVal); // Atomic compare-and-swap
+		old = *baseAddress;
+		char currentVal = (old & mask) >> shift;
+		currentVal |= val;
+		newVal = (old & ~mask) | ((currentVal & 0xFF) << shift);
+		assumed = atomicCAS(baseAddress, old, newVal);
 	} while (assumed != old);
 
-	return (old & mask) >> shift; // Return the previous value of the `char`
+	return (old & mask) >> shift;
 }
 
 __global__ void flFindInsigBits(unsigned int seg_count, unsigned char* input, unsigned int frame_size_B, unsigned int* seg_sizes, unsigned int* seg_offsets, unsigned int* insig_bits)
 {
-	//extern __shared__ int temp[];
+	extern __shared__ unsigned char frame[];
+
+	int frame_num = blockIdx.x;
+	input += frame_num * frame_size_B; // move pointer to the beginning of the frame
+
+	// Copy the frame to shared memory
+	unsigned int bytes_per_thread = frame_size_B / blockDim.y + (frame_size_B % blockDim.y != 0);
+	for (unsigned int byte_num = 0; byte_num < bytes_per_thread; ++byte_num)
+	{
+		unsigned int byte_offset = threadIdx.y * bytes_per_thread + byte_num;
+		if (byte_offset >= frame_size_B) break;
+		frame[byte_offset] = input[byte_offset];
+	}
+
+	__syncthreads();
 
 	int i = blockIdx.y * blockDim.y + threadIdx.y;
-	if (i >= seg_count) return;
-
-	input += blockIdx.x * frame_size_B; // move pointer to the beginning of the frame
+	if (i >= seg_count) return;	
 
 	unsigned int seg_size = seg_sizes[i];
 	unsigned int seg_offset = seg_offsets[i];
@@ -42,12 +53,12 @@ __global__ void flFindInsigBits(unsigned int seg_count, unsigned char* input, un
 		++bit_offset;
 		if (bit_offset == frame_size_B * 8 - 1) break;
 
-		unsigned char bit = input[bit_offset / 8] & (1 << (7 - (bit_offset % 8)));
+		unsigned char bit = frame[bit_offset / 8] & (1 << (7 - (bit_offset % 8)));
 		if (bit != 0) break;
 		++insig_bits_count;
 	}
 
-	insig_bits[blockIdx.x * seg_count + i] = insig_bits_count;
+	insig_bits[frame_num * seg_count + i] = insig_bits_count;
 }
 
 __global__ void flComputeNumOfZeros(unsigned int divisions_count, unsigned int* division_zeros, unsigned int* division_seg_sizes, unsigned int frame_size_b, DivisionWrapper* output)
@@ -61,26 +72,28 @@ __global__ void flComputeNumOfZeros(unsigned int divisions_count, unsigned int* 
 	unsigned int minimum = division_zeros[frame_offset + i];
 	unsigned int zeros = minimum * (frame_size_b / seg_size + (frame_size_b % seg_size != 0));
 
-	//unsigned int remainder_zeros = 0;
-	//unsigned int remainder_size = frame_size_b % seg_size;
-	//if (frame_size_b % seg_size != 0)
-	//{
-	//	if (minimum >= remainder_size)
-	//	{
-	//		remainder_zeros = remainder_size - 1;
-	//	}
-	//	else
-	//	{
-	//		remainder_zeros = minimum;
-	//	}
-	//}
-
 	output[frame_offset + i] = DivisionWrapper(zeros, seg_size, minimum);
 }
 
 __global__ void flProduceOutput(unsigned char* input, DivisionWrapper* divisions, DivisionWrapper* totals, unsigned int frame_size_b, unsigned char* output, unsigned int header_array_size)
 {
+	extern __shared__ unsigned char frame[];
+
 	int frame_num = blockIdx.x;
+	unsigned int frame_size_B = frame_size_b / 8;
+	input += frame_num * frame_size_B; // move pointer to the beginning of the frame
+
+	// Copy the frame to shared memory
+	unsigned int bytes_per_thread = frame_size_B / blockDim.y + (frame_size_B % blockDim.y != 0);
+	for (unsigned int byte_num = 0; byte_num < bytes_per_thread; ++byte_num)
+	{
+		unsigned int byte_offset = threadIdx.y * bytes_per_thread + byte_num;
+		if (byte_offset >= frame_size_B) break;
+		frame[byte_offset] = input[byte_offset];
+	}
+
+	__syncthreads();
+
 	DivisionWrapper division = divisions[frame_num];
 	unsigned int seg_size = division.seg_size;
 
@@ -91,12 +104,12 @@ __global__ void flProduceOutput(unsigned char* input, DivisionWrapper* divisions
 	unsigned int frame_offset_b = frame_size_b * frame_num;
 	unsigned int output_frame_offset_b = header_array_size * 8 + frame_offset_b - (totals[frame_num].removed_zeros - division.removed_zeros);  // since totals is an inclusive scan, we need to subtract current removed zeros
 
-	unsigned int seg_offset = frame_offset_b + i * seg_size;
+	unsigned int seg_offset = i * seg_size;
 	unsigned int output_offset = output_frame_offset_b + i * (seg_size - insig_zeros);
 	for (int bit_num = 0; bit_num < seg_size - insig_zeros; ++bit_num)
 	{
 		unsigned int bit_offset = seg_offset + insig_zeros + bit_num;
-		unsigned char bit = input[bit_offset / 8] & (1 << (7 - (bit_offset % 8)));
+		unsigned char bit = frame[bit_offset / 8] & (1 << (7 - (bit_offset % 8)));
 		
 		unsigned int output_bit_offset = output_offset + bit_num;
 		atomicOrChar(output + output_bit_offset / 8, (bit != 0) << (7 - (output_bit_offset % 8)));

@@ -14,8 +14,8 @@ int main(int argc, char* argv[])
        //if (argv[1][0] != 'c' && argv[1][0] != 'd') PRINT_USAGE;
        //if (argv[2][0] != 'f' && argv[2][0] != 'r') PRINT_USAGE;
 
-    std::ifstream input_file("test_files/fl_output.txt", std::ios::in | std::ios::binary);
-    std::ofstream output_file("test_files/fl_output2.txt", std::ios::out | std::ios::binary);
+    std::ifstream input_file("test_files/fl_input.txt", std::ios::in | std::ios::binary);
+    std::ofstream output_file("test_files/fl_output.txt", std::ios::out | std::ios::binary);
     if (!input_file || !output_file) {
         return 1;
     }
@@ -31,7 +31,7 @@ int main(int argc, char* argv[])
 
     input_file.close();
 
-	auto compressed = fixed_length_decompress(input, input_size, output, output_size);
+	auto compressed = fixed_length_compress(input, input_size, output, output_size);
     output_file.write(reinterpret_cast<char*>(output), output_size);
 	output_file.close();
 

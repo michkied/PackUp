@@ -109,7 +109,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	// Find the number of insignificant bits in each segment
 	// Each block is one-dimensional and each row of blocks processes one frame. The x coordinate of the block is the frame number.
 	fprintf(stderr, "Finding insignificant bits for every division\n");
-	flFindInsigBits << < dim3{ frame_count, seg_count / threads_per_block + 1 }, dim3{ 1, threads_per_block } >> > (seg_count, dev_input, frame_size_B, dev_seg_sizes, dev_seg_offsets, dev_insig_bits_count);
+	flFindInsigBits << < dim3{ frame_count, seg_count / threads_per_block + 1 }, dim3{ 1, threads_per_block }, frame_size_B >> > (seg_count, dev_input, frame_size_B, dev_seg_sizes, dev_seg_offsets, dev_insig_bits_count);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "flFindInsigBits launch failed: %s\n", cudaGetErrorString(cudaStatus));
@@ -222,7 +222,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		goto Cleanup;
 	}
 
-	flProduceOutput << < dim3{ frame_count, (frame_size_b / 2) / threads_per_block + 1 }, dim3{ 1, threads_per_block } >> > (dev_input, dev_divisions, dev_division_scan, frame_size_b, dev_output, header_array_size);
+	flProduceOutput << < dim3{ frame_count, (frame_size_b / 2) / threads_per_block + 1 }, dim3{ 1, threads_per_block }, frame_size_B * 2 >> > (dev_input, dev_divisions, dev_division_scan, frame_size_b, dev_output, header_array_size);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "flProduceOutput launch failed: %s\n", cudaGetErrorString(cudaStatus));
@@ -231,7 +231,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	flAddHeadersAndRemainders << < frame_count / threads_per_block + 1, threads_per_block >> > (frame_count, dev_input, dev_divisions, dev_division_scan, frame_size_b, dev_output, header_array_size);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "flIncludeRemainders launch failed: %s\n", cudaGetErrorString(cudaStatus));
+		fprintf(stderr, "flAddHeadersAndRemainders launch failed: %s\n", cudaGetErrorString(cudaStatus));
 		goto Cleanup;
 	}
 
@@ -248,7 +248,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	// Synchronize
 	cudaStatus = cudaDeviceSynchronize();
 	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flProduceOutput and flIncludeRemainders!\n", cudaStatus);
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flProduceOutput and flAddHeadersAndRemainders!\n", cudaStatus);
 		goto Cleanup;
 	}
 	fprintf(stderr, "    Done\n");
@@ -341,14 +341,6 @@ cudaError_t fixed_length_decompress(unsigned char* input, long unsigned int inpu
 		dev_frame_lengths + frame_count,
 		dev_frame_lengths_scan
 	);
-
-	// debug
-	unsigned int* debug = new unsigned int[frame_count];
-	cudaStatus = cudaMemcpy(debug, dev_frame_lengths_scan, frame_count * sizeof(int), cudaMemcpyDeviceToHost);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Cleanup;
-	}
 
 	unsigned int compressed_length_b = 0;
 	cudaStatus = cudaMemcpy(&compressed_length_b, dev_frame_lengths_scan + frame_count - 1, sizeof(int), cudaMemcpyDeviceToHost);
