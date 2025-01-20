@@ -120,8 +120,8 @@ __global__ void flAddHeadersAndRemainders(unsigned int frame_count, unsigned cha
 	unsigned int out_seg_size = division.seg_size - division.insig_zeros;
 	output[frame_num * 2] = out_seg_size & 0xFF;
 	output[frame_num * 2 + 1] = (out_seg_size >> 8) & 0xFF;
-	output[(frame_count + frame_num) * 2] = division.removed_zeros & 0xFF;
-	output[(frame_count + frame_num) * 2 + 1] = (division.removed_zeros >> 8) & 0xFF;
+	output[(frame_count + frame_num) * 2] = division.insig_zeros & 0xFF;
+	output[(frame_count + frame_num) * 2 + 1] = (division.insig_zeros >> 8) & 0xFF;
 
 	// Add remainder
 	unsigned int remainder_size = frame_size_b % division.seg_size;
@@ -154,29 +154,61 @@ __global__ void flComputeFrameLengths(unsigned int frame_count, unsigned int fra
 	int frame_num = blockIdx.x * blockDim.x + threadIdx.x;
 	if (frame_num >= frame_count) return;
 
-	//unsigned int out_seg_size = header_array[frame_num * 2] + (header_array[frame_num * 2 + 1] << 8);
-	unsigned int removed_zeros = header_array[(frame_count + frame_num) * 2] + (header_array[(frame_count + frame_num) * 2 + 1] << 8);
+	unsigned int out_seg_size = header_array[frame_num * 2] + (header_array[frame_num * 2 + 1] << 8);
+	unsigned int insig_zeros = header_array[(frame_count + frame_num) * 2] + (header_array[(frame_count + frame_num) * 2 + 1] << 8);
+	unsigned int seg_size = out_seg_size + insig_zeros;
+	unsigned int seg_count = frame_size_B * 8 / seg_size;
 
-	frame_lengths[frame_num] = frame_size_B * 8 - removed_zeros;
+	unsigned int frame_length = seg_count * out_seg_size + ((frame_size_B * 8) % seg_size != 0) * out_seg_size;
+
+	frame_lengths[frame_num] = frame_length;
 }
 
-__global__ void flDecompressFrames(unsigned int frame_count, unsigned char* input, unsigned int* frame_lengths, unsigned int* comp_frame_offsets, unsigned int frame_size_B, unsigned char* output)
+__global__ void flDecompressFrames(unsigned int frame_count, unsigned char* input, unsigned int* frame_lengths, unsigned int* frame_length_scan, unsigned int frame_size_B, unsigned char* output)
 {
 	int frame_num = blockIdx.x * blockDim.x + threadIdx.x;
 	if (frame_num >= frame_count) return;
 
-	unsigned int frame_offset = comp_frame_offsets[frame_num];
-	unsigned int output_frame_offset = frame_num * frame_size_B;
 	unsigned int comp_frame_length = frame_lengths[frame_num];
+	unsigned int header_array_size_b = frame_count * 4 * 8;
+	unsigned int comp_frame_offset = header_array_size_b + frame_length_scan[frame_num] - comp_frame_length;
 
-	unsigned int out_seg_size = input[frame_num * 2] + (input[frame_num * 2 + 1] << 8);
+	unsigned int seg_size = input[frame_num * 2] + (input[frame_num * 2 + 1] << 8);
 	unsigned int removed_zeros = input[(frame_count + frame_num) * 2] + (input[(frame_count + frame_num) * 2 + 1] << 8);
 
-	unsigned int zeros_per_segment = removed_zeros / out_seg_size;
-	unsigned int seg_size = out_seg_size + zeros_per_segment;
+	unsigned int frame_size_b = frame_size_B * 8;
+	unsigned int seg_count = frame_size_b / seg_size;
+	unsigned int zeros_per_segment = removed_zeros / seg_count;
+	unsigned int comp_seg_size = seg_size - zeros_per_segment;
+	unsigned int output_frame_offset_b = frame_num * frame_size_b;
 
-	//for (unsigned int byte_num = 0; byte_num < frame_size_B; ++byte_num)
+	output[frame_num] = zeros_per_segment & 0xFF;
+
+	//for (unsigned int seg_num = 0; seg_num < seg_count; ++seg_num)
 	//{
-	//	output[output_frame_offset + byte_num] = input[comp_frame_offset + byte_num];
+	//	for (unsigned int bit_num = 0; bit_num < comp_seg_size; ++bit_num)
+	//	{
+	//		unsigned int bit_offset = comp_frame_offset + seg_num * comp_seg_size + bit_num;
+	//		unsigned char bit = input[bit_offset / 8] & (1 << (7 - (bit_offset % 8)));
+
+	//		unsigned int output_bit_offset = output_frame_offset_b + seg_num * seg_size + zeros_per_segment + bit_num;
+	//		output[output_bit_offset / 8] |= (bit != 0) << (7 - (output_bit_offset % 8));
+	//	}
+	//}
+
+	//unsigned int remainder_size = frame_size_b % seg_size;
+	//if (remainder_size == 0) return;
+
+	//unsigned int remainder_zeros = removed_zeros % seg_count;
+	//unsigned int remainder_offset = comp_frame_offset + seg_count * comp_seg_size;
+	//unsigned int output_remainder_offset = output_frame_offset_b + seg_count * seg_size + remainder_zeros;
+
+	//for (unsigned int bit_num = 0; bit_num < remainder_size - remainder_zeros; ++bit_num)
+	//{
+	//	unsigned int bit_offset = remainder_offset + bit_num;
+	//	unsigned char bit = input[bit_offset / 8] & (1 << (7 - (bit_offset % 8)));
+
+	//	unsigned int output_bit_offset = output_remainder_offset + bit_num;
+	//	output[output_bit_offset / 8] |= (bit != 0) << (7 - (output_bit_offset % 8));
 	//}
 }

@@ -14,10 +14,10 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	output_size = 0;
 	output = nullptr;
 
-	unsigned int frame_size_B = 2;
+	unsigned int frame_size_B = 1;
 	unsigned int frame_size_b = frame_size_B * 8;
 	unsigned int frame_count = input_size / frame_size_B;
-	unsigned int threads_per_block = 1024;
+	unsigned int threads_per_block = 256;
 
 	// Precompute helper arrays
 	fprintf(stderr, "Precomputing helper arrays\n");
@@ -203,7 +203,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	}
 
 	unsigned int header_info_size = 4 + 2; // 4 bytes for frame count, 2 bytes for frame size
-	unsigned int header_array_size = frame_count * (2 + 2); // 2 bytes per frame for out segment size, 2 bytes per frame for total removed zeros in frame
+	unsigned int header_array_size = frame_count * (2 + 2); // 2 bytes per frame for segment size, 2 bytes per frame for total removed zeros in frame
 	unsigned int header_size = header_info_size + header_array_size; 
 
 	unsigned int compressed_size_b = frame_size_b * frame_count - totals.removed_zeros;
@@ -354,25 +354,38 @@ cudaError_t fixed_length_decompress(unsigned char* input, long unsigned int inpu
 	output_size = frame_count * frame_size_B + non_processed_size;
 
 	output = new unsigned char[output_size];
-	cudaStatus = cudaMalloc((void**)&dev_output, output_size - compressed_length_B);
+	cudaStatus = cudaMalloc((void**)&dev_output, frame_count * frame_size_B);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc failed!");
 		goto Cleanup;
 	}
-	cudaStatus = cudaMemset(dev_output, 0, output_size - compressed_length_B);
+	cudaStatus = cudaMemset(dev_output, 0, frame_count * frame_size_B);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemset failed!");
 		goto Cleanup;
 	}
 
 	// Decompress frames
-	// __global__ void flDecompressFrames(unsigned int frame_count, unsigned char* input, unsigned int* frame_lengths, unsigned int* comp_frame_offsets, unsigned int frame_size_B, unsigned char* output);
 	flDecompressFrames << < frame_count / threads_per_block + 1, threads_per_block >> > (frame_count, dev_input + 6, dev_frame_lengths, dev_frame_lengths_scan, frame_size_B, dev_output);
-	
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "flDecompressFrames launch failed: %s\n", cudaGetErrorString(cudaStatus));
+		goto Cleanup;
+	}
 
+	// Add bytes to the end that were not processed
+	for (unsigned int byte = 1; byte <= non_processed_size; ++byte)
+	{
+		output[output_size - byte] = input[input_size - byte];
+	}
 
-	unsigned int* debug2 = new unsigned int[frame_count];
-	cudaStatus = cudaMemcpy(debug2, dev_frame_lengths, frame_count * sizeof(int), cudaMemcpyDeviceToHost);
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flDecompressFrames!\n", cudaStatus);
+		goto Cleanup;
+	}
+
+	cudaStatus = cudaMemcpy(output, dev_output, frame_count * frame_size_B, cudaMemcpyDeviceToHost);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
