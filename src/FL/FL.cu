@@ -122,13 +122,6 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	}
 	fprintf(stderr, "    Done\n");
 
-	unsigned int* debug1 = new unsigned int[seg_count * frame_count];
-	cudaStatus = cudaMemcpy(debug1, dev_insig_bits_count, seg_count * frame_count * sizeof(int), cudaMemcpyDeviceToHost);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Cleanup;
-	}
-
 	// Find minimums within each division for each frame
 	fprintf(stderr, "Finding minimums within divisions\n");
 	thrust::reduce_by_key(
@@ -174,13 +167,6 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		goto Cleanup;
 	}
 	fprintf(stderr, "    Done\n");
-
-	DivisionWrapper* debug2 = new DivisionWrapper[seg_count * frame_count];
-	cudaStatus = cudaMemcpy(debug2, dev_divisions, divisions_count * frame_count * sizeof(DivisionWrapper), cudaMemcpyDeviceToHost);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Cleanup;
-	}
 
 	// Find the division with the most zeros removed for each frame
 	fprintf(stderr, "Fiding best division\n");
@@ -356,6 +342,14 @@ cudaError_t fixed_length_decompress(unsigned char* input, long unsigned int inpu
 		dev_frame_lengths_scan
 	);
 
+	// debug
+	unsigned int* debug = new unsigned int[frame_count];
+	cudaStatus = cudaMemcpy(debug, dev_frame_lengths_scan, frame_count * sizeof(int), cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Cleanup;
+	}
+
 	unsigned int compressed_length_b = 0;
 	cudaStatus = cudaMemcpy(&compressed_length_b, dev_frame_lengths_scan + frame_count - 1, sizeof(int), cudaMemcpyDeviceToHost);
 	if (cudaStatus != cudaSuccess) {
@@ -405,9 +399,12 @@ cudaError_t fixed_length_decompress(unsigned char* input, long unsigned int inpu
 		goto Cleanup;
 	}
 
-	// Allocate memory for the output
-
 
 Cleanup:
+	cudaFree(dev_input);
+	cudaFree(dev_frame_lengths);
+	cudaFree(dev_frame_lengths_scan);
+	cudaFree(dev_output);
+
 	return cudaStatus;
 }
