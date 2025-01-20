@@ -40,11 +40,7 @@ __global__ void flFindInsigBits(unsigned int seg_count, unsigned char* input, un
 	for (unsigned int bit_num = 0; bit_num < seg_size - 1; ++bit_num)
 	{
 		++bit_offset;
-		if (bit_offset >= frame_size_B * 8)
-		{
-			++insig_bits_count;
-			continue;
-		}
+		if (bit_offset == frame_size_B * 8 - 1) break;
 
 		unsigned char bit = input[bit_offset / 8] & (1 << (7 - (bit_offset % 8)));
 		if (bit != 0) break;
@@ -63,23 +59,23 @@ __global__ void flComputeNumOfZeros(unsigned int divisions_count, unsigned int* 
 
 	unsigned int seg_size = division_seg_sizes[i];
 	unsigned int minimum = division_zeros[frame_offset + i];
-	unsigned int regular_zeros = minimum * (frame_size_b / seg_size);
+	unsigned int zeros = minimum * (frame_size_b / seg_size + (frame_size_b % seg_size != 0));
 
-	unsigned int remainder_zeros = 0;
-	unsigned int remainder_size = frame_size_b % seg_size;
-	if (remainder_size != 0)
-	{
-		if (minimum >= remainder_size)
-		{
-			remainder_zeros = remainder_size - 1;
-		}
-		else
-		{
-			remainder_zeros = minimum;
-		}
-	}
+	//unsigned int remainder_zeros = 0;
+	//unsigned int remainder_size = frame_size_b % seg_size;
+	//if (frame_size_b % seg_size != 0)
+	//{
+	//	if (minimum >= remainder_size)
+	//	{
+	//		remainder_zeros = remainder_size - 1;
+	//	}
+	//	else
+	//	{
+	//		remainder_zeros = minimum;
+	//	}
+	//}
 
-	output[frame_offset + i] = DivisionWrapper(regular_zeros + remainder_zeros, seg_size, minimum);
+	output[frame_offset + i] = DivisionWrapper(zeros, seg_size, minimum);
 }
 
 __global__ void flProduceOutput(unsigned char* input, DivisionWrapper* divisions, DivisionWrapper* totals, unsigned int frame_size_b, unsigned char* output, unsigned int header_array_size)
@@ -127,15 +123,10 @@ __global__ void flAddHeadersAndRemainders(unsigned int frame_count, unsigned cha
 	unsigned int remainder_size = frame_size_b % division.seg_size;
 	if (remainder_size == 0) return;
 
-	unsigned int remainder_zeros = division.insig_zeros;
-	if (division.insig_zeros >= remainder_size)
-	{
-		remainder_zeros = remainder_size - 1;
-	}
-	unsigned int remainder_offset = frame_offset_b + frame_size_b - remainder_size + remainder_zeros;
+	unsigned int remainder_offset = frame_offset_b + frame_size_b - remainder_size + division.insig_zeros;
 	unsigned int output_end_offset = output_frame_offset_b + frame_size_b - division.removed_zeros;
-	unsigned int output_offset = output_end_offset - remainder_size + remainder_zeros;
-	for (unsigned int bit_num = 0; bit_num < remainder_size - remainder_zeros; ++bit_num)
+	unsigned int output_offset = output_end_offset - remainder_size + division.insig_zeros;
+	for (unsigned int bit_num = 0; bit_num < remainder_size - division.insig_zeros; ++bit_num)
 	{
 		unsigned int bit_offset = remainder_offset + bit_num;
 		unsigned char bit = input[bit_offset / 8] & (1 << (7 - (bit_offset % 8)));
@@ -159,7 +150,10 @@ __global__ void flComputeFrameLengths(unsigned int frame_count, unsigned int fra
 	unsigned int seg_size = out_seg_size + insig_zeros;
 	unsigned int seg_count = frame_size_B * 8 / seg_size;
 
-	unsigned int frame_length = seg_count * out_seg_size + ((frame_size_B * 8) % seg_size != 0) * out_seg_size;
+	unsigned int frame_length = seg_count * out_seg_size;
+	if ((frame_size_B * 8) % seg_size != 0) {
+		frame_length += (frame_size_B * 8) % seg_size - insig_zeros;
+	}
 
 	frame_lengths[frame_num] = frame_length;
 }
