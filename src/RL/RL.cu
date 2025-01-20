@@ -8,7 +8,8 @@
 #include <thrust/execution_policy.h>
 #include "thrust/scan.h"
 
-cudaError_t run_length_compress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size) {
+cudaError_t run_length_compress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size, unsigned int parameter)
+{
     unsigned char* dev_input;
     unsigned char* dev_output;
     unsigned int* dev_A;
@@ -20,7 +21,7 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
     unsigned int* dev_output_repetitions_scan;
 
     int partition_size = 255;
-    unsigned int symbol_size = 3; // max 255
+    unsigned int symbol_size = parameter; // max 255
 	unsigned int threads_per_block = 256;
 	unsigned int symbol_count = input_size / symbol_size;
 
@@ -79,48 +80,6 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
     // Calculate scan
     fprintf(stderr, "Scan\n");
 	thrust::inclusive_scan(thrust::device, dev_B, dev_B + symbol_count, dev_B);
-
-    // TODO: check if own implementation is faster
-
-	///*rlPrescan << < symbol_count / threads_per_block + 1, threads_per_block, symbol_count * sizeof(int) >> > (dev_B, dev_B_scan, symbol_count);*/
-
- //   //for (int i = 0; i < symbol_count; i += threads_per_block * 2)
- //   //{
- //   //    rlScan << < 1, threads_per_block, threads_per_block * 2 * sizeof(int) >> > (dev_B + i, threads_per_block * 2);
- //   //    cudaStatus = cudaGetLastError();
- //   //    if (cudaStatus != cudaSuccess) {
- //   //        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
- //   //        cudaFree(dev_input);
- //   //        cudaFree(dev_output_counts);
- //   //        cudaFree(dev_output_symbols);
- //   //        cudaFree(dev_A);
- //   //        cudaFree(dev_B);
- //   //        return cudaStatus;
- //   //    }
- //   //}
-
- //   rlScan << < array_size / 2 / threads_per_block, threads_per_block, threads_per_block * 2 * sizeof(int) >> > (dev_B, threads_per_block * 2);
- //   cudaStatus = cudaGetLastError();
- //   if (cudaStatus != cudaSuccess) {
- //       fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
- //       cudaFree(dev_input);
- //       cudaFree(dev_output_counts);
- //       cudaFree(dev_output_symbols);
- //       cudaFree(dev_A);
- //       cudaFree(dev_B);
- //       return cudaStatus;
- //   }
-
- //   cudaStatus = cudaDeviceSynchronize();
- //   if (cudaStatus != cudaSuccess) {
- //       fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
- //       cudaFree(dev_input);
- //       cudaFree(dev_output_counts);
- //       cudaFree(dev_output_symbols);
- //       cudaFree(dev_A);
- //       cudaFree(dev_B);
- //       return cudaStatus;
- //   }
     fprintf(stderr, "   Done\n");
 
     // Calculate segmented scan

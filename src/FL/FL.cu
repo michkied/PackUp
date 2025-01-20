@@ -9,12 +9,12 @@
 #include <FL/FLkernels.h>
 #include <FL/types.hpp>
 
-cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size) 
+cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size, unsigned int parameter) 
 {
 	output_size = 0;
 	output = nullptr;
 
-	unsigned int frame_size_B = 1;
+	unsigned int frame_size_B = parameter;
 	unsigned int frame_size_b = frame_size_B * 8;
 	unsigned int frame_count = input_size / frame_size_B;
 	unsigned int threads_per_block = 256;
