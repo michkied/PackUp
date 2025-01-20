@@ -118,11 +118,10 @@ __global__ void flAddHeadersAndRemainders(unsigned int frame_count, unsigned cha
 
 	// Add header
 	unsigned int out_seg_size = division.seg_size - division.insig_zeros;
-	unsigned int insig_zeros = division.insig_zeros;
-	output[frame_num * 4] = out_seg_size & 0xFF;
-	output[frame_num * 4 + 1] = (out_seg_size >> 8) & 0xFF;
-	output[frame_num * 4 + 2] = insig_zeros & 0xFF;
-	output[frame_num * 4 + 3] = (insig_zeros >> 8) & 0xFF;
+	output[frame_num * 2] = out_seg_size & 0xFF;
+	output[frame_num * 2 + 1] = (out_seg_size >> 8) & 0xFF;
+	output[(frame_count + frame_num) * 2] = division.removed_zeros & 0xFF;
+	output[(frame_count + frame_num) * 2 + 1] = (division.removed_zeros >> 8) & 0xFF;
 
 	// Add remainder
 	unsigned int remainder_size = frame_size_b % division.seg_size;
@@ -146,4 +145,38 @@ __global__ void flAddHeadersAndRemainders(unsigned int frame_count, unsigned cha
 		}
 		++output_offset;
 	}
+}
+
+// "frame size" is the size of the frame before compression
+// "frame length" is the size of the frame after compression
+__global__ void flComputeFrameLengths(unsigned int frame_count, unsigned int frame_size_B, unsigned char* header_array, unsigned int* frame_lengths)
+{
+	int frame_num = blockIdx.x * blockDim.x + threadIdx.x;
+	if (frame_num >= frame_count) return;
+
+	//unsigned int out_seg_size = header_array[frame_num * 2] + (header_array[frame_num * 2 + 1] << 8);
+	unsigned int removed_zeros = header_array[(frame_count + frame_num) * 2] + (header_array[(frame_count + frame_num) * 2 + 1] << 8);
+
+	frame_lengths[frame_num] = frame_size_B * 8 - removed_zeros;
+}
+
+__global__ void flDecompressFrames(unsigned int frame_count, unsigned char* input, unsigned int* frame_lengths, unsigned int* comp_frame_offsets, unsigned int frame_size_B, unsigned char* output)
+{
+	int frame_num = blockIdx.x * blockDim.x + threadIdx.x;
+	if (frame_num >= frame_count) return;
+
+	unsigned int frame_offset = comp_frame_offsets[frame_num];
+	unsigned int output_frame_offset = frame_num * frame_size_B;
+	unsigned int comp_frame_length = frame_lengths[frame_num];
+
+	unsigned int out_seg_size = input[frame_num * 2] + (input[frame_num * 2 + 1] << 8);
+	unsigned int removed_zeros = input[(frame_count + frame_num) * 2] + (input[(frame_count + frame_num) * 2 + 1] << 8);
+
+	unsigned int zeros_per_segment = removed_zeros / out_seg_size;
+	unsigned int seg_size = out_seg_size + zeros_per_segment;
+
+	//for (unsigned int byte_num = 0; byte_num < frame_size_B; ++byte_num)
+	//{
+	//	output[output_frame_offset + byte_num] = input[comp_frame_offset + byte_num];
+	//}
 }
