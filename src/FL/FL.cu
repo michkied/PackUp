@@ -13,6 +13,39 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 {
 	output_size = 0;
 	output = nullptr;
+	long unsigned int max_portion_size = 1 << 25;
+
+	cudaError_t cudaStatus = cudaSuccess;
+
+	for (long unsigned int i = 0; i < input_size; i += max_portion_size)
+	{
+		unsigned int portion_size = std::min(max_portion_size, input_size - i);
+
+		unsigned char* portion_output = nullptr;
+		long unsigned int portion_output_size = 0;
+
+		cudaStatus = fixed_length_compress_portion(input + i, portion_size, portion_output, portion_output_size, parameter);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "fixed_length_compress_portion failed!");
+			return cudaError_t::cudaErrorUnknown;
+		}
+		unsigned char* new_output = new unsigned char[output_size + 4 + portion_output_size];
+		std::memcpy(new_output, output, output_size);
+		std::memcpy(new_output + output_size, &portion_output_size, 4);
+		std::memcpy(new_output + output_size + 4, portion_output, portion_output_size);
+
+		delete[] output;
+		delete[] portion_output;
+
+		output = new_output;
+		output_size += portion_output_size + 4;
+	}
+
+	return cudaSuccess;
+}
+
+cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size, unsigned int parameter) 
+{
 
 	unsigned int frame_size_B = parameter;
 	unsigned int frame_size_b = frame_size_B * 8;
@@ -52,7 +85,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 	cudaStatus = cudaSetDevice(0);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-		goto Cleanup;
+		return cudaError_t::cudaErrorUnknown;
 	}
 
 	// Allocate memory
@@ -72,7 +105,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		fprintf(stderr, "cudaMalloc failed!");
 		goto Cleanup;
 	}
-	cudaStatus = cudaMalloc((void**)&dev_division_seg_sizes, divisions_count * sizeof(int));
+	cudaStatus = cudaMalloc((void**)&dev_division_seg_sizes, divisions_count * frame_count * sizeof(int));
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc failed!");
 		goto Cleanup;
@@ -135,11 +168,6 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		thrust::minimum<unsigned int>{}
 	);
 	fprintf(stderr, "    Done\n");
-
-	// Free memory that is no longer needed
-	cudaFree(dev_seg_offsets);
-	cudaFree(dev_seg_sizes);
-	cudaFree(dev_insig_bits_count);
 
 	// Allocate memory for division wrappers
 	cudaStatus = cudaMalloc((void**)&dev_divisions, divisions_count * frame_count * sizeof(DivisionWrapper));
@@ -222,7 +250,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 		goto Cleanup;
 	}
 
-	flProduceOutput << < dim3{ frame_count, (frame_size_b / 2) / threads_per_block + 1 }, dim3{ 1, threads_per_block }, frame_size_B * 2 >> > (dev_input, dev_divisions, dev_division_scan, frame_size_b, dev_output, header_array_size);
+	flProduceOutput << < dim3{ frame_count, (frame_size_b / 2) / threads_per_block + 1 }, dim3{ 1, threads_per_block }, frame_size_B >> > (dev_input, dev_divisions, dev_division_scan, frame_size_b, dev_output, header_array_size);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "flProduceOutput launch failed: %s\n", cudaGetErrorString(cudaStatus));
@@ -275,7 +303,68 @@ Cleanup:
 	return cudaStatus;
 }
 
-cudaError_t fixed_length_decompress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size) 
+cudaError_t fixed_length_decompress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size)
+{
+	output_size = 0;
+	output = nullptr;
+	long unsigned int max_portion_size = 1 << 25;
+
+	long unsigned int processed_size = 0;
+	unsigned int portion_size = 0;
+	std::memcpy(&portion_size, input, 4);
+	input += 4;
+
+	while (processed_size < input_size)
+	{
+		unsigned char* portion_output = nullptr;
+		long unsigned int portion_output_size = 0;
+
+		cudaError_t cudaStatus = fixed_length_decompress_portion(input, portion_size, portion_output, portion_output_size);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "fixed_length_decompress_portion failed!");
+			return cudaError_t::cudaErrorUnknown;
+		}
+		unsigned char* new_output = new unsigned char[output_size + portion_output_size];
+
+		std::memcpy(new_output, output, output_size);
+		std::memcpy(new_output + output_size, portion_output, portion_output_size);
+
+		delete[] output;
+		delete[] portion_output;
+
+		output = new_output;
+		output_size += portion_output_size;
+		processed_size += 4 + portion_size;
+		input += portion_size;
+		std::memcpy(&portion_size, input, 4);
+		input += 4;
+	}
+
+	/*cudaError_t cudaStatus = cudaSuccess;
+	for (long unsigned int i = 0; i < portion_count; ++i)
+	{
+		unsigned int portion_size = std::min(max_portion_size, input_size - i);
+		unsigned char* portion_output = nullptr;
+		long unsigned int portion_output_size = 0;
+		cudaStatus = fixed_length_decompress_portion(input + i * max_portion_size, portion_size, portion_output, portion_output_size);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "fixed_length_decompress_portion failed!");
+			return cudaError_t::cudaErrorUnknown;
+		}
+		unsigned char* new_output = new unsigned char[output_size + portion_output_size];
+		std::memcpy(new_output, output, output_size);
+		std::memcpy(new_output + output_size, portion_output, portion_output_size);
+
+		delete[] output;
+		delete[] portion_output;
+
+		output = new_output;
+		output_size += portion_output_size;
+	}*/
+	return cudaSuccess;
+}
+
+cudaError_t fixed_length_decompress_portion(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size) 
 {
 	unsigned int threads_per_block = 1024;
 
