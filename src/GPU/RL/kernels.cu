@@ -2,7 +2,7 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
-#include "RL/kernels.h"
+#include "GPU/RL/kernels.h"
 
 __global__ void rlNeighborArrays(unsigned char* input, long unsigned int input_size, unsigned int symbol_size, unsigned int* A, unsigned int* B)
 {

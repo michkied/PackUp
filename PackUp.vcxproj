@@ -81,20 +81,22 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CudaCompile Include="src\FL\FL.cu" />
-    <CudaCompile Include="src\FL\FLkernels.cu" />
-    <CudaCompile Include="src\RL\kernels.cu" />
-    <CudaCompile Include="src\RL\RL.cu" />
+    <CudaCompile Include="src\GPU\FL\FL.cu" />
+    <CudaCompile Include="src\GPU\FL\FLkernels.cu" />
+    <CudaCompile Include="src\GPU\RL\kernels.cu" />
+    <CudaCompile Include="src\GPU\RL\RL.cu" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="include\FL\types.hpp" />
-    <ClInclude Include="include\FL\FL.h" />
-    <ClInclude Include="include\FL\FLkernels.h" />
-    <ClInclude Include="include\RL\kernels.h" />
-    <ClInclude Include="include\RL\RL.h" />
+    <ClInclude Include="include\CPU\CPU.hpp" />
+    <ClInclude Include="include\GPU\FL\types.hpp" />
+    <ClInclude Include="include\GPU\FL\FL.h" />
+    <ClInclude Include="include\GPU\FL\FLkernels.h" />
+    <ClInclude Include="include\GPU\RL\kernels.h" />
+    <ClInclude Include="include\GPU\RL\RL.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="src\CPU\CPU.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

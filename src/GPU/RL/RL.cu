@@ -2,8 +2,8 @@
 #include "device_launch_parameters.h"
 #include <stdio.h>
 
-#include "RL/kernels.h"
-#include "RL/RL.h"
+#include "GPU/RL/kernels.h"
+#include "GPU/RL/RL.h"
 #include "thrust/functional.h"
 #include <thrust/execution_policy.h>
 #include "thrust/scan.h"

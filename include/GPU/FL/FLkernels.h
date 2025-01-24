@@ -2,7 +2,7 @@
 
 #include "cuda_runtime.h"
 
-#include <FL/types.hpp>
+#include <GPU/FL/types.hpp>
 
 // Compression
 

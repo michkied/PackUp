@@ -2,8 +2,8 @@
 #include <device_atomic_functions.h>
 #include "device_launch_parameters.h"
 
-#include "FL/FLkernels.h"
-#include "FL/types.hpp"
+#include "GPU/FL/FLkernels.h"
+#include "GPU/FL/types.hpp"
 
 __device__ char atomicOrChar(unsigned char* address, char val) {
 	unsigned int* baseAddress = (unsigned int*)((uintptr_t)address & ~3);

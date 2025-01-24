@@ -5,9 +5,9 @@
 #include <thrust/execution_policy.h>
 #include <thrust/extrema.h>
 
-#include <FL/FL.h>
-#include <FL/FLkernels.h>
-#include <FL/types.hpp>
+#include <GPU/FL/FL.h>
+#include <GPU/FL/FLkernels.h>
+#include <GPU/FL/types.hpp>
 
 cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size, unsigned int parameter) 
 {
