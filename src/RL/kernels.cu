@@ -32,7 +32,7 @@ __global__ void rlCollectResults(unsigned char* input, long unsigned int input_s
 
 	unsigned int symbol_index = B[i] - 1;
 	output_counts[symbol_index] = A[i];
-	repetitions[symbol_index] = A[i] / partition_size + (A[i] % partition_size != 0); // ceiling
+	repetitions[symbol_index] = A[i] / partition_size + (A[i] % partition_size != 0);
 	for (int j = 0; j < symbol_size; j++) {
 		unsigned int byte_index = symbol_index * symbol_size + j;
 		output_symbols[byte_index] = input[i * symbol_size + j];
@@ -64,5 +64,32 @@ __global__ void rlGenerateOutput(unsigned int bound, unsigned int symbol_size, u
 			output[adj_bound + (repetitions_scan[i] + rep) * symbol_size + byte] = output_symbols[i * symbol_size + byte];
 		}
 	}
+}
+
+__global__ void rlPrepareForScan(unsigned int array_size, unsigned char* input, unsigned int* array)
+{
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= array_size) return;
+	array[i] = input[i];
+}
+
+__global__ void rlDecompress(unsigned int* offsets, unsigned int array_size, unsigned char* input, unsigned int symbol_size, unsigned char* output)
+{
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= array_size) return;
+
+	unsigned char* array = input;
+	unsigned char* data = input + array_size;
+
+	unsigned int output_offset = offsets[i];
+	unsigned int count = array[i];
+	for (int j = 0; j < count; j++)
+	{
+		for (int byte = 0; byte < symbol_size; byte++)
+		{
+			output[(output_offset + j) * symbol_size + byte] = data[i * symbol_size + byte];
+		}
+	}
+
 }
 

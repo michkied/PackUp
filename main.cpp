@@ -11,14 +11,14 @@ void print_usage(const char* path)
     std::cout << "Usage: " << path << " <c/d> <fl/rl> <input file> <output file> [frame size (fl) / symbol size (rl)]" << std::endl;
 }
 
-//int main(int argc, char* argv[])
+//int main2(int argc, char* argv[])
 //{
 //    //   if (argc != 5) PRINT_USAGE;
 //       //if (argv[1][0] != 'c' && argv[1][0] != 'd') PRINT_USAGE;
 //       //if (argv[2][0] != 'f' && argv[2][0] != 'r') PRINT_USAGE;
 //
-//    std::ifstream input_file("test_files/fl_output.txt", std::ios::in | std::ios::binary);
-//    std::ofstream output_file("test_files/fl_output2.txt", std::ios::out | std::ios::binary);
+//    std::ifstream input_file("test_files/image_output", std::ios::in | std::ios::binary);
+//    std::ofstream output_file("test_files/image_decomp.bmp", std::ios::out | std::ios::binary);
 //    if (!input_file || !output_file) {
 //        return 1;
 //    }
@@ -34,7 +34,7 @@ void print_usage(const char* path)
 //
 //    input_file.close();
 //
-//	auto compressed = fixed_length_decompress(input, input_size, output, output_size);
+//	auto compressed = run_length_decompress(input, input_size, output, output_size);
 //    output_file.write(reinterpret_cast<char*>(output), output_size);
 //	output_file.close();
 //

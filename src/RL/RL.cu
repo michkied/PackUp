@@ -177,7 +177,7 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
     }
 
 
-Cleanup:
+    Cleanup:
     cudaFree(dev_input);
     cudaFree(dev_output);
     cudaFree(dev_output_counts);
@@ -192,31 +192,125 @@ Cleanup:
 
 cudaError_t run_length_decompress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size)
 {
-    // check if file compressed correctly
+	unsigned int threads_per_block = 256;
     unsigned int header_size = 5;
     unsigned int symbol_size = input[0];
     unsigned int array_size;
     std::memcpy(&array_size, input + 1, 4);
-    unsigned int remaining_symbols = input_size - header_size - array_size - array_size * symbol_size;
+    unsigned int remaining_bytes = input_size - header_size - array_size - array_size * symbol_size;
 
-    output_size = 0;
-    output = new unsigned char[symbol_size * array_size * 255];
-    for (unsigned int symbol_index = 0; symbol_index < array_size; ++symbol_index)
-    {
-        for (int rep = 0; rep < input[header_size + symbol_index]; ++rep)
-        {
-            for (int byte = 0; byte < symbol_size; ++byte)
-            {
-                output[output_size] = input[header_size + array_size + symbol_index * symbol_size + byte];
-                output_size++;
-            }
-        }
+	unsigned char* dev_input;
+    unsigned int* dev_offsets;
+	unsigned char* dev_output;
+	cudaError_t cudaStatus;
+    cudaStatus = cudaSetDevice(0);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+        goto Cleanup;
     }
-    while (remaining_symbols > 0)
-    {
-        output[output_size++] = input[input_size - remaining_symbols--];
+
+    // Allocate memory
+    cudaStatus = cudaMalloc((void**)&dev_input, input_size);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Cleanup;
     }
+	cudaStatus = cudaMalloc((void**)&dev_offsets, array_size * sizeof(int));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Cleanup;
+    }
+
+	// Copy input
+	cudaStatus = cudaMemcpy(dev_input, input, input_size, cudaMemcpyHostToDevice);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Cleanup;
+	}
+
+	rlPrepareForScan << <array_size / threads_per_block + 1, threads_per_block >> > (array_size, dev_input + header_size, dev_offsets);
+    cudaStatus = cudaGetLastError();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "rlPrepareForScan launch failed: %s\n", cudaGetErrorString(cudaStatus));
+        goto Cleanup;
+    }
+    cudaStatus = cudaDeviceSynchronize();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching rlPrepareForScan!\n", cudaStatus);
+        goto Cleanup;
+    }
+
+	thrust::exclusive_scan(thrust::device, dev_offsets, dev_offsets + array_size, dev_offsets);
+
+	unsigned int* debug = new unsigned int[array_size];
+	cudaStatus = cudaMemcpy(debug, dev_offsets, array_size * sizeof(int), cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Cleanup;
+	}
+
+	unsigned int total_symbols = 0;
+	cudaStatus = cudaMemcpy(&total_symbols, dev_offsets + array_size - 1, sizeof(int), cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Cleanup;
+	}
+    total_symbols += input[header_size + array_size - 1];
+
+	output_size = symbol_size * total_symbols;
+    cudaStatus = cudaMalloc((void**)&dev_output, output_size);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Cleanup;
+    }
+
+    // __global__ void rlDecompress(unsigned int* offsets, unsigned int array_size, unsigned char* input, unsigned int symbol_size, unsigned char* output);
+	rlDecompress << <array_size / threads_per_block + 1, threads_per_block >> > (dev_offsets, array_size, dev_input + header_size, symbol_size, dev_output);
+    cudaStatus = cudaGetLastError();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "rlDecompress launch failed: %s\n", cudaGetErrorString(cudaStatus));
+        goto Cleanup;
+    }
+    cudaStatus = cudaDeviceSynchronize();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching rlDecompress!\n", cudaStatus);
+        goto Cleanup;
+    }
+
+    output = new unsigned char[output_size + symbol_size];
+	cudaStatus = cudaMemcpy(output, dev_output, output_size, cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Cleanup;
+	}
+
+    while (remaining_bytes > 0)
+    {
+        output[output_size++] = input[input_size - remaining_bytes--];
+    }
+
+    //output_size = 0;
+    //output = new unsigned char[symbol_size * array_size * 255];
+    //for (unsigned int symbol_index = 0; symbol_index < array_size; ++symbol_index)
+    //{
+    //    for (int rep = 0; rep < input[header_size + symbol_index]; ++rep)
+    //    {
+    //        for (int byte = 0; byte < symbol_size; ++byte)
+    //        {
+    //            output[output_size] = input[header_size + array_size + symbol_index * symbol_size + byte];
+    //            output_size++;
+    //        }
+    //    }
+    //}
+    //while (remaining_bytes > 0)
+    //{
+    //    output[output_size++] = input[input_size - remaining_bytes--];
+    //}
     
+Cleanup:
+	cudaFree(dev_input);
+	cudaFree(dev_output);
+	cudaFree(dev_offsets);
 
     return cudaSuccess;
 }
