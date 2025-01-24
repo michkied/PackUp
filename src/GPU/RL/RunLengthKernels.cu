@@ -27,6 +27,8 @@ __global__ void rlNeighborArrays(unsigned char* input, long unsigned int input_s
 }
 
 // Create an array of symbols and their counts
+// We start with a thread for each symbol.
+// If the symbol is on the boundary between two different symbols, we collect relevant data from A and B at the same index.
 __global__ void rlCollectResults(unsigned char* input, long unsigned int input_size, unsigned int symbol_size,  unsigned int* A, unsigned int* B, unsigned int* output_counts, unsigned char* output_symbols, unsigned int partition_size, unsigned int* repetitions)
 {
 	int tID = blockIdx.x * blockDim.x + threadIdx.x;
