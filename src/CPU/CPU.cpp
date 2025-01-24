@@ -5,14 +5,12 @@
 
 namespace CPU 
 {
-    void fixed_length_compress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size, unsigned int parameter) 
-    {
+    // disabled from interface
+    void fixed_length_compress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size, unsigned int parameter) {}
 
-    }
-
+    // disabled from the interface - works only for some inputs
     void fixed_length_decompress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size) 
     {
-        // works only for some inputs
         output_size = 0;
         output = nullptr;
         long unsigned int max_portion_size = 1 << 25;

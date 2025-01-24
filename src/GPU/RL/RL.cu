@@ -105,7 +105,7 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
     unsigned int bound;
     cudaStatus = cudaMemcpy(&bound, dev_B + symbol_count - 1, sizeof(int), cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
+        fprintf(stderr, "cudaMemcpy failed!");
         goto Cleanup;
     }
     cudaStatus = cudaMalloc((void**)&dev_output_counts, bound * sizeof(int));

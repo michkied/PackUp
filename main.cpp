@@ -33,7 +33,8 @@ int main(int argc, char* argv[]) {
     bool compare = false;
     if (argc > 5)
     {
-        compare = (argv[5] == "cmp");
+        std::string cmp = argv[5];
+        compare = (cmp == "cmp");
     }
 
     if (argc == 7)
@@ -87,6 +88,9 @@ int main(int argc, char* argv[]) {
     unsigned char* output = nullptr;
     long unsigned int output_size = 0;
 
+    unsigned char* _ = nullptr;
+    long unsigned int __ = 0;
+
     if (mode == "c")
     {
         if (algorithm == "fl")
@@ -110,14 +114,15 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             auto end_time = std::chrono::high_resolution_clock::now();
-            std::cout << "    GPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+            std::cout << "GPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
 
             if (compare)
             {
+                std::cout << "Running on CPU..." << std::endl;
                 auto start_time = std::chrono::high_resolution_clock::now();
-                CPU::run_length_compress(input, input_size, output, output_size, parameter);
+                CPU::run_length_compress(input, input_size, _, __, parameter);
                 auto end_time = std::chrono::high_resolution_clock::now();
-                std::cout << "    CPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+                std::cout << "CPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
             }
         }
         else
@@ -151,14 +156,15 @@ int main(int argc, char* argv[]) {
             }
 
             auto end_time = std::chrono::high_resolution_clock::now();
-            std::cout << "    GPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+            std::cout << "GPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
 
             if (compare)
             {
+                std::cout << "Running on CPU..." << std::endl;
                 auto start_time = std::chrono::high_resolution_clock::now();
-                CPU::run_length_decompress(input, input_size, output, output_size);
+                CPU::run_length_decompress(input, input_size, _, __);
                 auto end_time = std::chrono::high_resolution_clock::now();
-                std::cout << "    CPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+                std::cout << "CPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
             }
         }
         else
@@ -180,6 +186,7 @@ int main(int argc, char* argv[]) {
 
     delete[] input;
     delete[] output;
+    delete[] _;
 
     cudaError_t cudaStatus = cudaDeviceReset();
     if (cudaStatus != cudaSuccess) {

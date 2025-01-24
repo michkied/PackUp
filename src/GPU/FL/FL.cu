@@ -19,9 +19,10 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 
 	cudaError_t cudaStatus = cudaSuccess;
 
+	unsigned int index = 1;
 	for (long unsigned int i = 0; i < input_size; i += max_portion_size)
 	{
-		printf("\Processing portion #%d\n", i+1);
+		printf("\Processing portion #%d\n", index);
 		unsigned int portion_size = std::min(max_portion_size, input_size - i);
 
 		unsigned char* portion_output = nullptr;
@@ -42,6 +43,8 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 
 		output = new_output;
 		output_size += portion_output_size + 4;
+
+		index++;
 	}
 
 	return cudaSuccess;
