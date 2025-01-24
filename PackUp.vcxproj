@@ -81,18 +81,18 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CudaCompile Include="src\GPU\FL\FL.cu" />
-    <CudaCompile Include="src\GPU\FL\FLkernels.cu" />
-    <CudaCompile Include="src\GPU\RL\kernels.cu" />
-    <CudaCompile Include="src\GPU\RL\RL.cu" />
+    <CudaCompile Include="src\GPU\FL\FixedLength.cu" />
+    <CudaCompile Include="src\GPU\FL\FixedLengthKernels.cu" />
+    <CudaCompile Include="src\GPU\RL\RunLengthKernels.cu" />
+    <CudaCompile Include="src\GPU\RL\RunLength.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\CPU\CPU.hpp" />
     <ClInclude Include="include\GPU\FL\types.hpp" />
-    <ClInclude Include="include\GPU\FL\FL.h" />
-    <ClInclude Include="include\GPU\FL\FLkernels.h" />
-    <ClInclude Include="include\GPU\RL\kernels.h" />
-    <ClInclude Include="include\GPU\RL\RL.h" />
+    <ClInclude Include="include\GPU\FL\FixedLength.h" />
+    <ClInclude Include="include\GPU\FL\FixedLengthKernels.h" />
+    <ClInclude Include="include\GPU\RL\RunLengthKernels.h" />
+    <ClInclude Include="include\GPU\RL\RunLength.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />

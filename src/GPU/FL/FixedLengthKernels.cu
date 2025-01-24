@@ -1,10 +1,12 @@
 #include <cuda_runtime.h>
 #include <device_atomic_functions.h>
-#include "device_launch_parameters.h"
+#include <device_launch_parameters.h>
 
-#include "GPU/FL/FLkernels.h"
-#include "GPU/FL/types.hpp"
+#include <GPU/FL/FixedLengthKernels.h>
+#include <GPU/FL/types.hpp>
 
+
+// Atomic OR for bytes
 __device__ char atomicOrChar(unsigned char* address, char val) {
 	unsigned int* baseAddress = (unsigned int*)((uintptr_t)address & ~3);
 	unsigned int shift = ((uintptr_t)address & 3) * 8;
@@ -22,6 +24,14 @@ __device__ char atomicOrChar(unsigned char* address, char val) {
 	return (old & mask) >> shift;
 }
 
+
+// Compression -----------------------------------------------------------------------------------------------
+
+
+// For every segment of the frame, find the number of insignificant zeros (one segment - one thread)
+// 
+// Threads for the same frame are positioned along the y dimension of the grid
+// The x dimension of the grid is the frame number 
 __global__ void flFindInsigBits(unsigned int seg_count, unsigned char* input, unsigned int frame_size_B, unsigned int* seg_sizes, unsigned int* seg_offsets, unsigned int* insig_bits)
 {
 	extern __shared__ unsigned char frame[];
@@ -40,11 +50,11 @@ __global__ void flFindInsigBits(unsigned int seg_count, unsigned char* input, un
 
 	__syncthreads();
 
-	int i = blockIdx.y * blockDim.y + threadIdx.y;
-	if (i >= seg_count) return;	
+	unsigned int tID = blockIdx.y * blockDim.y + threadIdx.y;
+	if (tID >= seg_count) return;	
 
-	unsigned int seg_size = seg_sizes[i];
-	unsigned int seg_offset = seg_offsets[i];
+	unsigned int seg_size = seg_sizes[tID];
+	unsigned int seg_offset = seg_offsets[tID];
 	
 	unsigned int insig_bits_count = 0;
 	unsigned int bit_offset = seg_offset - 1;
@@ -58,23 +68,28 @@ __global__ void flFindInsigBits(unsigned int seg_count, unsigned char* input, un
 		++insig_bits_count;
 	}
 
-	insig_bits[frame_num * seg_count + i] = insig_bits_count;
+	insig_bits[frame_num * seg_count + tID] = insig_bits_count;
 }
 
+// For every division, compute the number of zeros that could be removed by it
+// Frames are stacked along the x dimension of the grid
 __global__ void flComputeNumOfZeros(unsigned int divisions_count, unsigned int* division_zeros, unsigned int* division_seg_sizes, unsigned int frame_size_b, DivisionWrapper* output)
 {
-	int i = blockIdx.y * blockDim.y + threadIdx.y;
-	if (i >= divisions_count) return;
+	int tID = blockIdx.y * blockDim.y + threadIdx.y;
+	if (tID >= divisions_count) return;
 
 	unsigned int frame_offset = blockIdx.x * divisions_count;
 
-	unsigned int seg_size = division_seg_sizes[i];
-	unsigned int minimum = division_zeros[frame_offset + i];
+	unsigned int seg_size = division_seg_sizes[tID];
+	unsigned int minimum = division_zeros[frame_offset + tID];
 	unsigned int zeros = minimum * (frame_size_b / seg_size + (frame_size_b % seg_size != 0));
 
-	output[frame_offset + i] = DivisionWrapper(zeros, seg_size, minimum);
+	output[frame_offset + tID] = DivisionWrapper(zeros, seg_size, minimum);
 }
 
+// For every segment of the frame, cut the insignificant zeros and produce the output
+// This kernel handles only the regular-sized segments, the remainders are handled by a separate kernel
+// Frames are stacked along the x dimension of the grid, 
 __global__ void flProduceOutput(unsigned char* input, DivisionWrapper* divisions, DivisionWrapper* totals, unsigned int frame_size_b, unsigned char* output, unsigned int header_array_size)
 {
 	extern __shared__ unsigned char frame[];
@@ -94,18 +109,18 @@ __global__ void flProduceOutput(unsigned char* input, DivisionWrapper* divisions
 
 	__syncthreads();
 
-	DivisionWrapper division = divisions[frame_num];
+	DivisionWrapper division = divisions[frame_num];  // best division for the frame
 	unsigned int seg_size = division.seg_size;
 
-	int i = blockIdx.y * blockDim.y + threadIdx.y;
-	if (i >= frame_size_b / seg_size) return;
+	int tID = blockIdx.y * blockDim.y + threadIdx.y;
+	if (tID >= frame_size_b / seg_size) return;
 
 	unsigned int insig_zeros = division.insig_zeros;
 	unsigned int frame_offset_b = frame_size_b * frame_num;
 	unsigned int output_frame_offset_b = header_array_size * 8 + frame_offset_b - (totals[frame_num].removed_zeros - division.removed_zeros);  // since totals is an inclusive scan, we need to subtract current removed zeros
 
-	unsigned int seg_offset = i * seg_size;
-	unsigned int output_offset = output_frame_offset_b + i * (seg_size - insig_zeros);
+	unsigned int seg_offset = tID * seg_size;
+	unsigned int output_offset = output_frame_offset_b + tID * (seg_size - insig_zeros);
 	for (int bit_num = 0; bit_num < seg_size - insig_zeros; ++bit_num)
 	{
 		unsigned int bit_offset = seg_offset + insig_zeros + bit_num;
@@ -116,9 +131,11 @@ __global__ void flProduceOutput(unsigned char* input, DivisionWrapper* divisions
 	}
 }
 
+// For every frame, add its header and (if necessary) remainder to the output
+// "Remainder" is the part of the frame that doesn't evenly fit into segments
 __global__ void flAddHeadersAndRemainders(unsigned int frame_count, unsigned char* input, DivisionWrapper* divisions, DivisionWrapper* totals, unsigned int frame_size_b, unsigned char* output, unsigned int header_array_size) 
 {
-	int frame_num = blockIdx.x * blockDim.x + threadIdx.x;
+	int frame_num = blockIdx.x * blockDim.x + threadIdx.x;  // thread ID is the frame number
 	if (frame_num >= frame_count) return;
 
 	DivisionWrapper division = divisions[frame_num];
@@ -151,9 +168,12 @@ __global__ void flAddHeadersAndRemainders(unsigned int frame_count, unsigned cha
 	}
 }
 
-// "frame size" is the size of the frame before compression
-// "frame length" is the size of the frame after compression
-__global__ void flComputeFrameLengths(unsigned int frame_count, unsigned int frame_size_B, unsigned char* header_array, unsigned int* frame_lengths)
+
+// Decompression -----------------------------------------------------------------------------------------------
+
+
+// For every frame, compute its compressed length
+__global__ void flComputeFrameLengths(unsigned int frame_count, unsigned int frame_size_B, unsigned char* header_array, unsigned int* comp_frame_lengths)
 {
 	int frame_num = blockIdx.x * blockDim.x + threadIdx.x;
 	if (frame_num >= frame_count) return;
@@ -170,9 +190,10 @@ __global__ void flComputeFrameLengths(unsigned int frame_count, unsigned int fra
 		frame_length += remainder_size - insig_zeros;
 	}
 
-	frame_lengths[frame_num] = frame_length;
+	comp_frame_lengths[frame_num] = frame_length;
 }
 
+// For every frame, put back the removed insignificant zeros and produce the output
 __global__ void flDecompressFrames(unsigned int frame_count, unsigned char* input, unsigned int* frame_lengths, unsigned int* frame_length_scan, unsigned int frame_size_B, unsigned char* output)
 {
 	int frame_num = blockIdx.x * blockDim.x + threadIdx.x;
@@ -202,6 +223,7 @@ __global__ void flDecompressFrames(unsigned int frame_count, unsigned char* inpu
 		}
 	}
 
+	// Handle the remainder (if applicable)
 	unsigned int remainder_size = frame_size_b % seg_size;
 	if (remainder_size == 0) return;
 

@@ -4,6 +4,7 @@
 #include <thrust/host_vector.h>
 #include <thrust/scan.h>
 
+// Iterates cyclically over an array of keys
 class CyclicIterator {
 public:
     using value_type = unsigned int;
@@ -89,6 +90,8 @@ private:
 	unsigned int _iteration;
 };
 
+
+// Allows the usage of thrust reduction while keeping track of other connected values
 struct DivisionWrapper {
     unsigned int removed_zeros = 0;
     unsigned int seg_size = 0;

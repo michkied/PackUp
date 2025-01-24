@@ -3,67 +3,68 @@
 #include <stdio.h>
 #include <chrono>
 
-#include "GPU/RL/kernels.h"
-#include "GPU/RL/RL.h"
+#include "GPU/RL/RunLengthkernels.h"
+#include "GPU/RL/RunLength.h"
 #include "thrust/functional.h"
 #include <thrust/execution_policy.h>
 #include "thrust/scan.h"
 
-cudaError_t run_length_compress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size, unsigned int parameter)
+RunLength::~RunLength()
+{
+	cudaFree(c_dev.input);
+	cudaFree(c_dev.A);
+	cudaFree(c_dev.B);
+	cudaFree(c_dev.output_counts);
+	cudaFree(c_dev.output_symbols);
+	cudaFree(c_dev.output_repetitions);
+	cudaFree(c_dev.output_repetitions_scan);
+	cudaFree(c_dev.output);
+
+	cudaFree(d_dev.input);
+	cudaFree(d_dev.offsets);
+	cudaFree(d_dev.output);
+}
+
+cudaError_t RunLength::compress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size, unsigned int parameter)
 {
     auto start_time = std::chrono::high_resolution_clock::now();
-
-    unsigned char* dev_input;
-    unsigned char* dev_output;
-    unsigned int* dev_A;
-	unsigned int* dev_B;
-
-    unsigned int* dev_output_counts;
-    unsigned char* dev_output_symbols;
-    unsigned int* dev_output_repetitions;
-    unsigned int* dev_output_repetitions_scan;
 
     int partition_size = 255;
     unsigned int symbol_size = parameter; // max 255
 	unsigned int threads_per_block = 256;
 	unsigned int symbol_count = input_size / symbol_size;
 
-    // God had no hand in the creation of this abhorrence
-    //unsigned int array_size = 0;
-    //while (array_size < symbol_count)
-    //    array_size += threads_per_block * 2;
-
     cudaError_t cudaStatus;
 
     cudaStatus = cudaSetDevice(0);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-        goto Cleanup;
+        return cudaStatus;
     }
 
     // Allocate memory
     printf("Allocating memory and copying data\n");
-    cudaStatus = cudaMalloc((void**)&dev_input, input_size);
+    cudaStatus = cudaMalloc((void**)&c_dev.input, input_size);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
-    cudaStatus = cudaMalloc((void**)&dev_A, symbol_count * sizeof(int));
+    cudaStatus = cudaMalloc((void**)&c_dev.A, symbol_count * sizeof(int));
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
-    cudaStatus = cudaMalloc((void**)&dev_B, symbol_count * sizeof(int));
+    cudaStatus = cudaMalloc((void**)&c_dev.B, symbol_count * sizeof(int));
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
 
     // Copy input
-	cudaStatus = cudaMemcpy(dev_input, input, input_size, cudaMemcpyHostToDevice);
+	cudaStatus = cudaMemcpy(c_dev.input, input, input_size, cudaMemcpyHostToDevice);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy failed!");
-        goto Cleanup;
+        return cudaStatus;
 	}
     auto end_time = std::chrono::high_resolution_clock::now();
     std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
@@ -71,31 +72,31 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
 
     // Prepare neighbor arrays
 	printf("Preparing neighbor arrays\n");
-	rlNeighborArrays << <symbol_count / threads_per_block + 1, threads_per_block >> > (dev_input, input_size, symbol_size, dev_A, dev_B);
+	rlNeighborArrays << <symbol_count / threads_per_block + 1, threads_per_block >> > (c_dev.input, input_size, symbol_size, c_dev.A, c_dev.B);
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "rlNeighborArrays launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        goto Cleanup;
+        return cudaStatus;
     }
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching rlNeighborArrays!\n", cudaStatus);
-        goto Cleanup;
+        return cudaStatus;
     }
     end_time = std::chrono::high_resolution_clock::now();
     std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
     start_time = end_time;
 
-    // Calculate scan
+	// Perform a scan on the B array
     printf("Performing a scan\n");
-	thrust::inclusive_scan(thrust::device, dev_B, dev_B + symbol_count, dev_B);
+	thrust::inclusive_scan(thrust::device, c_dev.B, c_dev.B + symbol_count, c_dev.B);
     end_time = std::chrono::high_resolution_clock::now();
     std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
     start_time = end_time;
 
-    // Calculate segmented scan
+	// Perform a segmented scan on the A array with B as the key
     printf("Performing a segmented scan\n");
-    thrust::inclusive_scan_by_key(thrust::device, dev_B, dev_B + symbol_count, dev_A, dev_A, thrust::equal_to<unsigned int>{}, thrust::plus<unsigned int>{});
+    thrust::inclusive_scan_by_key(thrust::device, c_dev.B, c_dev.B + symbol_count, c_dev.A, c_dev.A, thrust::equal_to<unsigned int>{}, thrust::plus<unsigned int>{});
     end_time = std::chrono::high_resolution_clock::now();
     std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
     start_time = end_time;
@@ -103,42 +104,42 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
 	// Collect results
     printf("Collecting results\n");
     unsigned int bound;
-    cudaStatus = cudaMemcpy(&bound, dev_B + symbol_count - 1, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaStatus = cudaMemcpy(&bound, c_dev.B + symbol_count - 1, sizeof(int), cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
-    cudaStatus = cudaMalloc((void**)&dev_output_counts, bound * sizeof(int));
+    cudaStatus = cudaMalloc((void**)&c_dev.output_counts, bound * sizeof(int));
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
-    cudaStatus = cudaMalloc((void**)&dev_output_symbols, bound * symbol_size);
+    cudaStatus = cudaMalloc((void**)&c_dev.output_symbols, bound * symbol_size);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
-    cudaStatus = cudaMalloc((void**)&dev_output_repetitions, bound * sizeof(int));
+    cudaStatus = cudaMalloc((void**)&c_dev.output_repetitions, bound * sizeof(int));
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
-    cudaStatus = cudaMalloc((void**)&dev_output_repetitions_scan, bound * sizeof(int));
+    cudaStatus = cudaMalloc((void**)&c_dev.output_repetitions_scan, bound * sizeof(int));
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
 
-	rlCollectResults << <symbol_count / threads_per_block + 1, threads_per_block >> > (dev_input, input_size, symbol_size, dev_A, dev_B, dev_output_counts, dev_output_symbols, partition_size, dev_output_repetitions);
+	rlCollectResults << <symbol_count / threads_per_block + 1, threads_per_block >> > (c_dev.input, input_size, symbol_size, c_dev.A, c_dev.B, c_dev.output_counts, c_dev.output_symbols, partition_size, c_dev.output_repetitions);
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "rlCollectResults launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        goto Cleanup;
+        return cudaStatus;
     }
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching rlCollectResults!\n", cudaStatus);
-        goto Cleanup;
+        return cudaStatus;
     }
     end_time = std::chrono::high_resolution_clock::now();
     std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
@@ -146,29 +147,31 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
 
     // Generate output
     printf("Generating output\n");
-    thrust::exclusive_scan(thrust::device, dev_output_repetitions, dev_output_repetitions + bound, dev_output_repetitions_scan);
+
+	// Perform a scan on the repetitions array to get offsets
+    thrust::exclusive_scan(thrust::device, c_dev.output_repetitions, c_dev.output_repetitions + bound, c_dev.output_repetitions_scan);
 
     unsigned int adjusted_bound, temp;
-    cudaMemcpy(&adjusted_bound, dev_output_repetitions_scan + bound - 1, sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(&temp, dev_output_repetitions + bound - 1, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&adjusted_bound, c_dev.output_repetitions_scan + bound - 1, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&temp, c_dev.output_repetitions + bound - 1, sizeof(int), cudaMemcpyDeviceToHost);
     adjusted_bound += temp;
 
-    cudaStatus = cudaMalloc((void**)&dev_output, adjusted_bound + adjusted_bound * symbol_size);
+    cudaStatus = cudaMalloc((void**)&c_dev.output, adjusted_bound + adjusted_bound * symbol_size);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
 
-    rlGenerateOutput << <bound / threads_per_block + 1, threads_per_block >> > (bound, symbol_size, dev_output_symbols, dev_output_counts, partition_size, dev_output_repetitions, dev_output_repetitions_scan, dev_output);
+    rlGenerateOutput << <bound / threads_per_block + 1, threads_per_block >> > (bound, symbol_size, c_dev.output_symbols, c_dev.output_counts, partition_size, c_dev.output_repetitions, c_dev.output_repetitions_scan, c_dev.output);
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "rlGenerateOutput launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        goto Cleanup;
+        return cudaStatus;
     }
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching rlGenerateOutput!\n", cudaStatus);
-        goto Cleanup;
+        return cudaStatus;
     }
 
     // Copy result
@@ -178,10 +181,10 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
     output_size = gpu_output_size + header_size + remaining_symbols_size;
 
     output = new unsigned char[output_size];
-    cudaStatus = cudaMemcpy(output + header_size, dev_output, gpu_output_size, cudaMemcpyDeviceToHost);
+    cudaStatus = cudaMemcpy(output + header_size, c_dev.output, gpu_output_size, cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
     output[0] = symbol_size;
     std::memcpy(output + 1, &adjusted_bound, 4);
@@ -194,21 +197,10 @@ cudaError_t run_length_compress(unsigned char* input, long unsigned int input_si
     std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
     start_time = end_time;
 
-
-    Cleanup:
-    cudaFree(dev_input);
-    cudaFree(dev_output);
-    cudaFree(dev_output_counts);
-    cudaFree(dev_output_symbols);
-    cudaFree(dev_A);
-    cudaFree(dev_B);
-	cudaFree(dev_output_repetitions);
-	cudaFree(dev_output_repetitions_scan);
-
     return cudaStatus;
 }
 
-cudaError_t run_length_decompress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size)
+cudaError_t RunLength::decompress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size)
 {
     auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -219,94 +211,93 @@ cudaError_t run_length_decompress(unsigned char* input, long unsigned int input_
     std::memcpy(&array_size, input + 1, 4);
     unsigned int remaining_bytes = input_size - header_size - array_size - array_size * symbol_size;
 
-	unsigned char* dev_input;
-    unsigned int* dev_offsets;
-	unsigned char* dev_output;
 	cudaError_t cudaStatus;
     cudaStatus = cudaSetDevice(0);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-        goto Cleanup;
+        return cudaStatus;
     }
 
     // Allocate memory
     printf("Allocating memory and copying data\n");
-    cudaStatus = cudaMalloc((void**)&dev_input, input_size);
+    cudaStatus = cudaMalloc((void**)&d_dev.input, input_size);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
-	cudaStatus = cudaMalloc((void**)&dev_offsets, array_size * sizeof(int));
+	cudaStatus = cudaMalloc((void**)&d_dev.offsets, array_size * sizeof(int));
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
 
 	// Copy input
-	cudaStatus = cudaMemcpy(dev_input, input, input_size, cudaMemcpyHostToDevice);
+	cudaStatus = cudaMemcpy(d_dev.input, input, input_size, cudaMemcpyHostToDevice);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy failed!");
-		goto Cleanup;
+		return cudaStatus;
 	}
     auto end_time = std::chrono::high_resolution_clock::now();
     std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
     start_time = end_time;
 
+	// Since the input is in the form of a byte array, we need to convert it to an array of integers to avoid overflows
     printf("Performing array type change to allow for a scan\n");
-	rlPrepareForScan << <array_size / threads_per_block + 1, threads_per_block >> > (array_size, dev_input + header_size, dev_offsets);
+	rlPrepareForScan << <array_size / threads_per_block + 1, threads_per_block >> > (array_size, d_dev.input + header_size, d_dev.offsets);
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "rlPrepareForScan launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        goto Cleanup;
+        return cudaStatus;
     }
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching rlPrepareForScan!\n", cudaStatus);
-        goto Cleanup;
+        return cudaStatus;
     }
     end_time = std::chrono::high_resolution_clock::now();
     std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
     start_time = end_time;
 
+	// Compute offsets
     printf("Performing a prescan\n");
-	thrust::exclusive_scan(thrust::device, dev_offsets, dev_offsets + array_size, dev_offsets);
+	thrust::exclusive_scan(thrust::device, d_dev.offsets, d_dev.offsets + array_size, d_dev.offsets);
     end_time = std::chrono::high_resolution_clock::now();
     std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
     start_time = end_time;
 
     printf("Generating output\n");
 	unsigned int total_symbols = 0;
-	cudaStatus = cudaMemcpy(&total_symbols, dev_offsets + array_size - 1, sizeof(int), cudaMemcpyDeviceToHost);
+	cudaStatus = cudaMemcpy(&total_symbols, d_dev.offsets + array_size - 1, sizeof(int), cudaMemcpyDeviceToHost);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy failed!");
-		goto Cleanup;
+		return cudaStatus;
 	}
     total_symbols += input[header_size + array_size - 1];
 
 	output_size = symbol_size * total_symbols;
-    cudaStatus = cudaMalloc((void**)&dev_output, output_size);
+    cudaStatus = cudaMalloc((void**)&d_dev.output, output_size);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
-        goto Cleanup;
+        return cudaStatus;
     }
 
-	rlDecompress << <array_size / threads_per_block + 1, threads_per_block >> > (dev_offsets, array_size, dev_input + header_size, symbol_size, dev_output);
+	rlDecompress << <array_size / threads_per_block + 1, threads_per_block >> > (d_dev.offsets, array_size, d_dev.input + header_size, symbol_size, d_dev.output);
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "rlDecompress launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        goto Cleanup;
+        return cudaStatus;
     }
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching rlDecompress!\n", cudaStatus);
-        goto Cleanup;
+        return cudaStatus;
     }
 
     output = new unsigned char[output_size + symbol_size];
-	cudaStatus = cudaMemcpy(output, dev_output, output_size, cudaMemcpyDeviceToHost);
+	cudaStatus = cudaMemcpy(output, d_dev.output, output_size, cudaMemcpyDeviceToHost);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy failed!");
-		goto Cleanup;
+		return cudaStatus;
 	}
 
     while (remaining_bytes > 0)
@@ -317,11 +308,6 @@ cudaError_t run_length_decompress(unsigned char* input, long unsigned int input_
     end_time = std::chrono::high_resolution_clock::now();
     std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
     start_time = end_time;
-    
-Cleanup:
-	cudaFree(dev_input);
-	cudaFree(dev_output);
-	cudaFree(dev_offsets);
 
     return cudaSuccess;
 }

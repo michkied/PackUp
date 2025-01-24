@@ -1,16 +1,16 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <CudaCompile Include="src\GPU\RL\kernels.cu" />
-    <CudaCompile Include="src\GPU\RL\RL.cu" />
-    <CudaCompile Include="src\GPU\FL\FL.cu" />
-    <CudaCompile Include="src\GPU\FL\FLkernels.cu" />
+    <CudaCompile Include="src\GPU\RL\RunLengthKernels.cu" />
+    <CudaCompile Include="src\GPU\RL\RunLength.cu" />
+    <CudaCompile Include="src\GPU\FL\FixedLength.cu" />
+    <CudaCompile Include="src\GPU\FL\FixedLengthKernels.cu" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="include\GPU\RL\kernels.h" />
-    <ClInclude Include="include\GPU\RL\RL.h" />
-    <ClInclude Include="include\GPU\FL\FLkernels.h" />
-    <ClInclude Include="include\GPU\FL\FL.h" />
+    <ClInclude Include="include\GPU\RL\RunLengthKernels.h" />
+    <ClInclude Include="include\GPU\RL\RunLength.h" />
+    <ClInclude Include="include\GPU\FL\FixedLengthKernels.h" />
+    <ClInclude Include="include\GPU\FL\FixedLength.h" />
     <ClInclude Include="include\GPU\FL\types.hpp" />
     <ClInclude Include="include\CPU\CPU.hpp" />
   </ItemGroup>
