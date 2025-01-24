@@ -4,10 +4,12 @@
 #include <thrust/functional.h>
 #include <thrust/execution_policy.h>
 #include <thrust/extrema.h>
+#include <chrono>
 
 #include <GPU/FL/FL.h>
 #include <GPU/FL/FLkernels.h>
 #include <GPU/FL/types.hpp>
+
 
 cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size, unsigned int parameter) 
 {
@@ -19,6 +21,7 @@ cudaError_t fixed_length_compress(unsigned char* input, long unsigned int input_
 
 	for (long unsigned int i = 0; i < input_size; i += max_portion_size)
 	{
+		printf("\Processing portion #%d\n", i+1);
 		unsigned int portion_size = std::min(max_portion_size, input_size - i);
 
 		unsigned char* portion_output = nullptr;
@@ -52,8 +55,10 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 	unsigned int frame_count = input_size / frame_size_B;
 	unsigned int threads_per_block = 256;
 
+	auto start_time = std::chrono::high_resolution_clock::now();
+
 	// Precompute helper arrays
-	fprintf(stderr, "Precomputing helper arrays\n");
+	printf("Precomputing helper arrays\n");
 	unsigned int seg_count = 0;
 	unsigned int divisions_count = 0;
 	std::vector<unsigned int> seg_sizes;
@@ -69,7 +74,9 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 		seg_count += threads;
 		++divisions_count;
 	}
-	fprintf(stderr, "    Done\n");
+	auto end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 	unsigned char* dev_input = nullptr;
 	unsigned int* dev_seg_sizes = nullptr;
@@ -89,7 +96,7 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 	}
 
 	// Allocate memory
-	fprintf(stderr, "Allocating memory and copying data\n");
+	printf("Allocating memory and copying data\n");
 	cudaStatus = cudaMalloc((void**)&dev_input, input_size);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc failed!");
@@ -137,11 +144,13 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
 	}
-	fprintf(stderr, "    Done\n");
+	end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 	// Find the number of insignificant bits in each segment
 	// Each block is one-dimensional and each row of blocks processes one frame. The x coordinate of the block is the frame number.
-	fprintf(stderr, "Finding insignificant bits for every division\n");
+	printf("Finding insignificant bits for every division\n");
 	flFindInsigBits << < dim3{ frame_count, seg_count / threads_per_block + 1 }, dim3{ 1, threads_per_block }, frame_size_B >> > (seg_count, dev_input, frame_size_B, dev_seg_sizes, dev_seg_offsets, dev_insig_bits_count);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
@@ -153,10 +162,12 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flFindInsigBits!\n", cudaStatus);
 		goto Cleanup;
 	}
-	fprintf(stderr, "    Done\n");
+	end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 	// Find minimums within each division for each frame
-	fprintf(stderr, "Finding minimums within divisions\n");
+	printf("Finding minimums within divisions\n");
 	thrust::reduce_by_key(
 		thrust::device,
 		CyclicIterator(dev_seg_sizes, seg_count),
@@ -167,7 +178,9 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 		thrust::equal_to<unsigned int>{},
 		thrust::minimum<unsigned int>{}
 	);
-	fprintf(stderr, "    Done\n");
+	end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 	// Allocate memory for division wrappers
 	cudaStatus = cudaMalloc((void**)&dev_divisions, divisions_count * frame_count * sizeof(DivisionWrapper));
@@ -182,7 +195,7 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 	}
 
 	// Compute the number of insignificant zeros removed by each division
-	fprintf(stderr, "Computing the number of insignificant zeros removed by each division\n");
+	printf("Computing the number of insignificant zeros removed by each division\n");
 	flComputeNumOfZeros << < dim3{ frame_count, divisions_count / threads_per_block + 1 }, dim3{ 1, threads_per_block } >> > (divisions_count, dev_division_zeros, dev_division_seg_sizes, frame_size_b, dev_divisions);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
@@ -194,10 +207,12 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flFindInsigBits!\n", cudaStatus);
 		goto Cleanup;
 	}
-	fprintf(stderr, "    Done\n");
+	end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 	// Find the division with the most zeros removed for each frame
-	fprintf(stderr, "Fiding best division\n");
+	printf("Fiding best division\n");
 	thrust::reduce_by_key(
 		thrust::device,
 		CyclicIterator(divisions_count),
@@ -208,10 +223,12 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 		thrust::less_equal<unsigned int>{},
 		thrust::maximum<DivisionWrapper>{}
 	);
-	fprintf(stderr, "    Done\n");
+	end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 	// Compute the prefix sum of best divisions
-	fprintf(stderr, "Computing the prefix sum of best divisions\n");
+	printf("Computing the prefix sum of best divisions\n");
 	thrust::inclusive_scan(
 		thrust::device,
 		dev_divisions,
@@ -219,10 +236,12 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 		dev_division_scan,
 		thrust::plus<DivisionWrapper>{}
 	);
-	fprintf(stderr, "    Done\n");
+	end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 	// Produce output
-	fprintf(stderr, "Producing output\n");
+	printf("Producing output\n");
 	DivisionWrapper totals;
 	cudaStatus = cudaMemcpy(&totals, dev_division_scan + frame_count - 1, sizeof(DivisionWrapper), cudaMemcpyDeviceToHost);
 	if (cudaStatus != cudaSuccess) {
@@ -279,7 +298,6 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flProduceOutput and flAddHeadersAndRemainders!\n", cudaStatus);
 		goto Cleanup;
 	}
-	fprintf(stderr, "    Done\n");
 	
 	// Copy output to host
 	cudaStatus = cudaMemcpy(output + header_info_size, dev_output, gpu_output_size, cudaMemcpyDeviceToHost);
@@ -287,6 +305,10 @@ cudaError_t fixed_length_compress_portion(unsigned char* input, long unsigned in
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
 	}
+
+	end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 
 Cleanup:
@@ -307,15 +329,16 @@ cudaError_t fixed_length_decompress(unsigned char* input, long unsigned int inpu
 {
 	output_size = 0;
 	output = nullptr;
-	long unsigned int max_portion_size = 1 << 25;
 
 	long unsigned int processed_size = 0;
 	unsigned int portion_size = 0;
 	std::memcpy(&portion_size, input, 4);
 	input += 4;
 
+	int i = 1;
 	while (processed_size < input_size)
 	{
+		printf("\Processing portion #%d\n", i);
 		unsigned char* portion_output = nullptr;
 		long unsigned int portion_output_size = 0;
 
@@ -338,34 +361,16 @@ cudaError_t fixed_length_decompress(unsigned char* input, long unsigned int inpu
 		input += portion_size;
 		std::memcpy(&portion_size, input, 4);
 		input += 4;
+		i++;
 	}
 
-	/*cudaError_t cudaStatus = cudaSuccess;
-	for (long unsigned int i = 0; i < portion_count; ++i)
-	{
-		unsigned int portion_size = std::min(max_portion_size, input_size - i);
-		unsigned char* portion_output = nullptr;
-		long unsigned int portion_output_size = 0;
-		cudaStatus = fixed_length_decompress_portion(input + i * max_portion_size, portion_size, portion_output, portion_output_size);
-		if (cudaStatus != cudaSuccess) {
-			fprintf(stderr, "fixed_length_decompress_portion failed!");
-			return cudaError_t::cudaErrorUnknown;
-		}
-		unsigned char* new_output = new unsigned char[output_size + portion_output_size];
-		std::memcpy(new_output, output, output_size);
-		std::memcpy(new_output + output_size, portion_output, portion_output_size);
-
-		delete[] output;
-		delete[] portion_output;
-
-		output = new_output;
-		output_size += portion_output_size;
-	}*/
 	return cudaSuccess;
 }
 
 cudaError_t fixed_length_decompress_portion(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size) 
 {
+	auto start_time = std::chrono::high_resolution_clock::now();
+
 	unsigned int threads_per_block = 1024;
 
 	unsigned int frame_count = 0;
@@ -386,7 +391,7 @@ cudaError_t fixed_length_decompress_portion(unsigned char* input, long unsigned 
 	}
 
 	// Allocate memory
-	fprintf(stderr, "Allocating memory and copying data\n");
+	printf("Allocating memory and copying data\n");
 	cudaStatus = cudaMalloc((void**)&dev_input, input_size);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc failed!");
@@ -409,8 +414,12 @@ cudaError_t fixed_length_decompress_portion(unsigned char* input, long unsigned 
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
 	}
+	auto end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 	// Compute the compressed frame lengths
+	printf("Computing compressed frame lengths\n");
 	flComputeFrameLengths << < frame_count / threads_per_block + 1, threads_per_block >> > (frame_count, frame_size_B, dev_input + 6, dev_frame_lengths);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
@@ -422,14 +431,21 @@ cudaError_t fixed_length_decompress_portion(unsigned char* input, long unsigned 
 		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching flComputeFrameLengths!\n", cudaStatus);
 		goto Cleanup;
 	}
+	end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 	// Perform a scan to find total length and calculate frame offsets
+	printf("Finding frame offsets\n");
 	thrust::inclusive_scan(
 		thrust::device,
 		dev_frame_lengths,
 		dev_frame_lengths + frame_count,
 		dev_frame_lengths_scan
 	);
+	end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 	unsigned int compressed_length_b = 0;
 	cudaStatus = cudaMemcpy(&compressed_length_b, dev_frame_lengths_scan + frame_count - 1, sizeof(int), cudaMemcpyDeviceToHost);
@@ -438,6 +454,7 @@ cudaError_t fixed_length_decompress_portion(unsigned char* input, long unsigned 
 		goto Cleanup;
 	}
 
+	printf("Preparing output\n");
 	unsigned int compressed_length_B = compressed_length_b / 8 + (compressed_length_b % 8 != 0);
 	unsigned int non_processed_size = input_size - 4 - 2 - frame_count * (2 + 2) - compressed_length_B;
 	output_size = frame_count * frame_size_B + non_processed_size;
@@ -479,6 +496,10 @@ cudaError_t fixed_length_decompress_portion(unsigned char* input, long unsigned 
 		fprintf(stderr, "cudaMemcpy failed!");
 		goto Cleanup;
 	}
+
+	end_time = std::chrono::high_resolution_clock::now();
+	std::cout << "    " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+	start_time = end_time;
 
 
 Cleanup:

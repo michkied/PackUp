@@ -6,53 +6,16 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <chrono>
 
 void print_usage(const char* path)
 {
-    std::cout << "Usage: " << path << " <c/d> <fl/rl> <input file> <output file> [frame size (fl) / symbol size (rl)]" << std::endl;
-}
-
-int main(int argc, char* argv[])
-{
-    //   if (argc != 5) PRINT_USAGE;
-       //if (argv[1][0] != 'c' && argv[1][0] != 'd') PRINT_USAGE;
-       //if (argv[2][0] != 'f' && argv[2][0] != 'r') PRINT_USAGE;
-
-    std::ifstream input_file("test_files/image_output", std::ios::in | std::ios::binary);
-    std::ofstream output_file("test_files/output.bmp", std::ios::out | std::ios::binary);
-    if (!input_file || !output_file) {
-        return 1;
-    }
-    long unsigned int input_size;
-	input_file.seekg(0, std::ios::end);
-	input_size = input_file.tellg();
-    input_file.seekg(0, std::ios::beg);
-	unsigned char* input = new unsigned char[input_size];
-	input_file.read(reinterpret_cast<char*>(input), input_size);
-    
-    unsigned char* output;
-    long unsigned int output_size;
-
-    input_file.close();
-
-	CPU::run_length_decompress(input, input_size, output, output_size);
-    output_file.write(reinterpret_cast<char*>(output), output_size);
-	output_file.close();
-
-    delete[] output;
-
-    cudaError_t cudaStatus = cudaDeviceReset();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceReset failed!");
-        return 1;
-    }
-
-    return 0;
+    std::cout << "Usage: " << path << " <c/d> <fl/rl> <input file> <output file> [no_cmp/cmp] [frame size (fl) / symbol size (rl)]" << std::endl;
 }
 
 
-int main2(int argc, char* argv[]) {
-    if (argc < 5 || argc > 6)
+int main(int argc, char* argv[]) {
+    if (argc < 5 || argc > 7)
     {
         print_usage(argv[0]);
         return 1;
@@ -67,11 +30,17 @@ int main2(int argc, char* argv[]) {
     std::ofstream output_file(output_path, std::ios::out | std::ios::binary);
 
     unsigned int parameter = 0;
-    if (argc == 6)
+    bool compare = false;
+    if (argc > 5)
+    {
+        compare = (argv[5] == "cmp");
+    }
+
+    if (argc == 7)
     {
         try
         {
-            parameter = std::stoi(argv[5]);
+            parameter = std::stoi(argv[6]);
         }
         catch (const std::invalid_argument& e)
         {
@@ -122,6 +91,7 @@ int main2(int argc, char* argv[]) {
     {
         if (algorithm == "fl")
         {
+            if (compare) std::cout << "CPU comparison available only for RL algorithm" << std::endl;
             if (fixed_length_compress(input, input_size, output, output_size, parameter) != cudaSuccess)
             {
                 std::cerr << "Fixed-length compression failed." << std::endl;
@@ -131,11 +101,23 @@ int main2(int argc, char* argv[]) {
         }
         else if (algorithm == "rl")
         {
+            auto start_time = std::chrono::high_resolution_clock::now();
+            std::cout << "Running on GPU..." << std::endl;
             if (run_length_compress(input, input_size, output, output_size, parameter) != cudaSuccess)
             {
                 std::cerr << "Run-length compression failed." << std::endl;
                 delete[] input;
                 return 1;
+            }
+            auto end_time = std::chrono::high_resolution_clock::now();
+            std::cout << "    GPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+
+            if (compare)
+            {
+                auto start_time = std::chrono::high_resolution_clock::now();
+                CPU::run_length_compress(input, input_size, output, output_size, parameter);
+                auto end_time = std::chrono::high_resolution_clock::now();
+                std::cout << "    CPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
             }
         }
         else
@@ -149,6 +131,7 @@ int main2(int argc, char* argv[]) {
     {
         if (algorithm == "fl")
         {
+            if (compare) std::cout << "CPU comparison available only for RL algorithm" << std::endl;
             if (fixed_length_decompress(input, input_size, output, output_size) != cudaSuccess)
             {
                 std::cerr << "Fixed-length decompression failed." << std::endl;
@@ -158,11 +141,24 @@ int main2(int argc, char* argv[]) {
         }
         else if (algorithm == "rl")
         {
+            auto start_time = std::chrono::high_resolution_clock::now();
+            std::cout << "Running on GPU..." << std::endl;
             if (run_length_decompress(input, input_size, output, output_size) != cudaSuccess)
             {
                 std::cerr << "Run-length decompression failed." << std::endl;
                 delete[] input;
                 return 1;
+            }
+
+            auto end_time = std::chrono::high_resolution_clock::now();
+            std::cout << "    GPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+
+            if (compare)
+            {
+                auto start_time = std::chrono::high_resolution_clock::now();
+                CPU::run_length_decompress(input, input_size, output, output_size);
+                auto end_time = std::chrono::high_resolution_clock::now();
+                std::cout << "    CPU finished in " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
             }
         }
         else
