@@ -39,7 +39,7 @@ cudaError_t FixedLength::compress(unsigned char* input, long unsigned int input_
 {
 	output_size = 0;
 	output = nullptr;
-	long unsigned int max_portion_size = 1 << 25;
+	long unsigned int max_portion_size = 1 << 23;
 
 	cudaError_t cudaStatus = cudaSuccess;
 
