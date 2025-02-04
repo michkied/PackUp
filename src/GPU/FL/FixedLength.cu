@@ -12,6 +12,11 @@
 
 FixedLength::~FixedLength()
 {
+	free_compression_memory();
+	free_decompression_memory();
+}
+
+void FixedLength::free_compression_memory() {
 	cudaFree(c_dev.input);
 	cudaFree(c_dev.seg_sizes);
 	cudaFree(c_dev.seg_offsets);
@@ -21,7 +26,9 @@ FixedLength::~FixedLength()
 	cudaFree(c_dev.output);
 	cudaFree(c_dev.divisions);
 	cudaFree(c_dev.division_scan);
+}
 
+void FixedLength::free_decompression_memory() {
 	cudaFree(d_dev.input);
 	cudaFree(d_dev.frame_lengths);
 	cudaFree(d_dev.frame_lengths_scan);
@@ -51,6 +58,7 @@ cudaError_t FixedLength::compress(unsigned char* input, long unsigned int input_
 			fprintf(stderr, "fixed_length_compress_portion failed!");
 			return cudaError_t::cudaErrorUnknown;
 		}
+		free_compression_memory();
 		unsigned char* new_output = new unsigned char[output_size + 4 + portion_output_size];
 		std::memcpy(new_output, output, output_size);
 		std::memcpy(new_output + output_size, &portion_output_size, 4);
@@ -90,6 +98,7 @@ cudaError_t FixedLength::decompress(unsigned char* input, long unsigned int inpu
 			fprintf(stderr, "fixed_length_decompress_portion failed!");
 			return cudaError_t::cudaErrorUnknown;
 		}
+		free_decompression_memory();
 		unsigned char* new_output = new unsigned char[output_size + portion_output_size];
 
 		std::memcpy(new_output, output, output_size);

@@ -32,6 +32,10 @@ private:
 		unsigned char* output = nullptr;
 	} d_dev;
 
+	void free_compression_memory();
+
+	void free_decompression_memory();
+
 	cudaError_t compress_portion(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size, unsigned int parameter);
 
 	cudaError_t decompress_portion(unsigned char* input, long unsigned int input_size, unsigned char*& output, long unsigned int& output_size);
