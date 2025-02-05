@@ -53,7 +53,7 @@ cudaError_t FixedLength::compress(unsigned char* input, long unsigned int input_
 		unsigned char* portion_output = nullptr;
 		long unsigned int portion_output_size = 0;
 
-		cudaStatus = compress_portion(input + i, portion_size, portion_output, portion_output_size, parameter);
+		cudaStatus = compress_portion(input + i, portion_size, portion_output, portion_output_size, parameter < portion_size ? parameter : portion_size);
 		if (cudaStatus != cudaSuccess) {
 			fprintf(stderr, "fixed_length_compress_portion failed!");
 			return cudaError_t::cudaErrorUnknown;
